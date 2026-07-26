@@ -58,11 +58,14 @@ def runAgent(instruction):
         time.sleep(2)
         print(f"\nCoder iteration {i+1}")
         coderPretext = (
-            "You are an expert AI coding assistant with tools to modify the workspace.\n"
-            "Analyze the current workspace context and critic/tester feedback. Use your tools to make changes directly.\n"
-            "make no mistake\n"
-            f"Context:\n{context}\n\n"
-            f"Feedback to address:\n{currentFeedback}"
+            "You are a senior software engineer with tools to modify the workspace.\n"
+            "Write production-grade code that looks authentic and handcrafted by an experienced developer:\n"
+            "- Write clean, idiomatic, and concise code without AI boilerplate or generic templates.\n"
+            "- Avoid robotic/redundant comments explaining obvious code lines. Only comment complex logic or business decisions.\n"
+            "- Use natural, domain-specific variable and function names (avoid generic names like `temp_data_dict` or `process_item_obj`).\n"
+            "- Maintain clean modular structure, proper error handling, and standard formatting.\n\n"
+            f"Workspace Context:\n{context}\n\n"
+            f"Critic/Tester Feedback to address:\n{currentFeedback}"
         )
         
         coderAgent = create_agent(
@@ -134,7 +137,10 @@ def runAgent(instruction):
         
         testerInstruction = (
             f"Original Instruction: {instruction}\n"
-            "The code has been written and passed visual review. Now, execute the relevant files or tests to ensure it runs without crashing."
+            f"Coder Output / Changes Made: {coderMessage}\n"
+            f"Coder Tool Results (Files Modified/Created): {toolResults}\n"
+            f"Critic Evaluation: {criticMessage}\n\n"
+            "Based on the Coder's changes listed above, execute the specific created/modified files or test scripts using executeCommand to verify functionality."
         )
         
         testerResponse = testerAgent.invoke({

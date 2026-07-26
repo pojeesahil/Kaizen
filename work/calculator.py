@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 def main():
     print("Welcome to the Calculator!")
     print("1. Add")
