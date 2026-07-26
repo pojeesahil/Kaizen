@@ -1,0 +1,4 @@
+secure.env
+.venv
+__pycache_
+__pycache__

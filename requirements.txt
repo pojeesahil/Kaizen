@@ -1,0 +1,11 @@
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
+langchain-google-genai
+langchain-chroma
+langchain-ollama
+python-dotenv
+chromadb
+networkx
+graphifyy
