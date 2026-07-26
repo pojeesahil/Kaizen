@@ -2,7 +2,7 @@ secure.env
 .venv
 __pycache_
 __pycache__
-graphify-out
-chroma_db
-work
+graphify-out/
+chroma_db/
+work/
 chroma_db/chroma.sqlite3

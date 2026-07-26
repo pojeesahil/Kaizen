@@ -3,6 +3,8 @@ from langchain.agents import create_agent
 from core.config import llm
 from core.tools import tools
 from rag.rag import indexWorkspace, getContext
+import asyncio
+from agents.planner import Planner
 
 def extractText(content) -> str:
     if isinstance(content, str):
@@ -86,6 +88,10 @@ def runAgent(instruction):
         for tr in toolResults:
             print(tr)
         
+        if toolResults:
+            print("Reindexing workspace after code modifications...")
+            indexWorkspace()
+        
         print(f"\nCritic iteration {i+1}")
         criticPretext = (
             "You are an expert Code Critic. Verify the code changes logically and structurally.\n"
@@ -110,12 +116,21 @@ def runAgent(instruction):
             "messages": [{"role": "user", "content": criticInstruction}]
         })
         
-        criticMessage = extractText(criticResponse["messages"][-1].content)
-        print("Critic output:", criticMessage)
-        
         criticToolResults = executeToolCalls(criticResponse, tools)
         for tr in criticToolResults:
             print(tr)
+
+        if criticToolResults:
+            criticResponse = criticAgent.invoke({
+                "messages": [
+                    {"role": "user", "content": criticInstruction},
+                    {"role": "assistant", "content": extractText(criticResponse["messages"][-1].content)},
+                    {"role": "user", "content": "File inspection results:\n" + "\n".join(criticToolResults) + "\n\nEvaluate the file contents above. Respond with PASS or FAIL."}
+                ]
+            })
+
+        criticMessage = extractText(criticResponse["messages"][-1].content)
+        print("Critic output:", criticMessage)
         
         if not criticMessage.strip().upper().startswith("PASS"):
             currentFeedback = f"Critic Feedback:\n{criticMessage}"
@@ -137,22 +152,31 @@ def runAgent(instruction):
         
         testerInstruction = (
             f"Original Instruction: {instruction}\n"
-            f"Coder Output / Changes Made: {coderMessage}\n"
-            f"Coder Tool Results (Files Modified/Created): {toolResults}\n"
+            f"Coder Output / Changes: {coderMessage}\n"
+            f"Coder Tool Execution Results: {toolResults}\n"
             f"Critic Evaluation: {criticMessage}\n\n"
-            "Based on the Coder's changes listed above, execute the specific created/modified files or test scripts using executeCommand to verify functionality."
+            "Use the executeCommand tool to run the created/modified files to verify functionality."
         )
         
         testerResponse = testerAgent.invoke({
             "messages": [{"role": "user", "content": testerInstruction}]
         })
         
-        testerMessage = extractText(testerResponse["messages"][-1].content)
-        print("Tester output:", testerMessage)
-        
         testerToolResults = executeToolCalls(testerResponse, tools)
         for tr in testerToolResults:
             print(tr)
+
+        if testerToolResults:
+            testerResponse = testerAgent.invoke({
+                "messages": [
+                    {"role": "user", "content": testerInstruction},
+                    {"role": "assistant", "content": extractText(testerResponse["messages"][-1].content)},
+                    {"role": "user", "content": "Terminal execution output:\n" + "\n".join(testerToolResults) + "\n\nEvaluate the actual terminal execution output above. Respond strictly with PASS or FAIL followed by details if failed."}
+                ]
+            })
+        
+        testerMessage = extractText(testerResponse["messages"][-1].content)
+        print("Tester output:", testerMessage)
         
         if testerMessage.strip().upper().startswith("PASS"):
             print("\nProcess finished successfully.")
@@ -176,7 +200,5 @@ if __name__ == "__main__":
             indexWorkspace()
             print("Reindexed the workspace")
         elif q:
-            import asyncio
-            from agents.planner import Planner
             planner = Planner()
             asyncio.run(planner.run(query))

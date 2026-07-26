@@ -7,6 +7,7 @@ from langchain_ollama import ChatOllama
 from agents.dag import DAG
 from agents.models import TaskNode
 from agents.scheduler import Scheduler
+from rag.rag import getContext
 
 
 class Planner:
@@ -41,7 +42,7 @@ class Planner:
 
         return "general"
 
-    def generate_plan(self, request: str, intent: str) -> list[dict]:
+    def generate_plan(self, request: str, intent: str, context: str = "") -> list[dict]:
         prompt = f"""
         You are the Planner Agent of an AI coding assistant. Break the user's request into 3-10 small executable tasks.
 
@@ -98,6 +99,9 @@ class Planner:
         }}
         ]
 
+        Codebase Context:
+        {context if context else 'No existing context available.'}
+
         User Request:
         {request}
 
@@ -151,7 +155,8 @@ class Planner:
         intent = self.detect_intent(request)
         print(f"Intent : {intent}")
 
-        plan = self.generate_plan(request, intent)
+        context = getContext(request)
+        plan = self.generate_plan(request, intent, context)
 
         print("\nGenerated Tasks")
         for task in plan:
