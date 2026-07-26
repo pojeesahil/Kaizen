@@ -9,7 +9,7 @@ SUPPORTED_EXTENSIONS = [
     ".html", ".css", ".json", ".yaml", ".yml", ".md"
 ]
 
-SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db"}
+SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out", "graphify_out"}
 
 
 class VectorStore:

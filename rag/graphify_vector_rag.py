@@ -16,6 +16,33 @@ class GraphifyVectorRAG(RAGInterface):
     def index_codebase(self, path):
         self.indexed_path = os.path.abspath(path)
 
+        print("running graphify on workspace...")
+        import shutil
+        import subprocess
+        import sys
+
+        graphify_cmd = shutil.which("graphify")
+        if graphify_cmd:
+            cmd = [graphify_cmd, path]
+        else:
+            cmd = [sys.executable, "-m", "graphify", path]
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, shell=(os.name == "nt"))
+            if res.returncode == 0:
+                print("  graphify completed successfully")
+            else:
+                print(f"  graphify note/output: {res.stdout[:200] if res.stdout else res.stderr[:200]}")
+        except Exception as e:
+            print(f"  graphify execution error: {e}")
+
+        work_gpath = os.path.join(path, "graphify-out")
+        root_gpath = "graphify-out"
+        if os.path.exists(work_gpath) and os.path.abspath(work_gpath) != os.path.abspath(root_gpath):
+            if os.path.exists(root_gpath):
+                shutil.rmtree(root_gpath, ignore_errors=True)
+            shutil.move(work_gpath, root_gpath)
+
         # index into vector db
         print("indexing into vector db...")
         self.vector_store.clear()
@@ -24,10 +51,10 @@ class GraphifyVectorRAG(RAGInterface):
             self.vector_store.add_documents(docs, metas, ids)
         print(f"  {self.vector_store.count()} chunks stored")
 
-        # load graph if graphify was already run
-        gpath = os.path.join(path, "graphify-out", "graph.json")
+        # load graph from root output directory outside work/
+        gpath = os.path.join(root_gpath, "graph.json")
         if os.path.exists(gpath):
-            print("loading knowledge graph...")
+            print(f"loading knowledge graph from {gpath}...")
             self.graph.load_graph(gpath)
         else:
             print("no graph found (run graphify to enable graph features)")

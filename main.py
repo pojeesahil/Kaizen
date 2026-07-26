@@ -3,6 +3,8 @@ from langchain.agents import create_agent
 from core.config import llm
 from core.tools import tools
 from rag.rag import indexWorkspace, getContext
+import asyncio
+from agents.planner import Planner
 
 def extractText(content) -> str:
     if isinstance(content, str):
@@ -58,11 +60,14 @@ def runAgent(instruction):
         time.sleep(2)
         print(f"\nCoder iteration {i+1}")
         coderPretext = (
-            "You are an expert AI coding assistant with tools to modify the workspace.\n"
-            "Analyze the current workspace context and critic/tester feedback. Use your tools to make changes directly.\n"
-            "make no mistake\n"
-            f"Context:\n{context}\n\n"
-            f"Feedback to address:\n{currentFeedback}"
+            "You are a senior software engineer with tools to modify the workspace.\n"
+            "Write production-grade code that looks authentic and handcrafted by an experienced developer:\n"
+            "- Write clean, idiomatic, and concise code without AI boilerplate or generic templates.\n"
+            "- Avoid robotic/redundant comments explaining obvious code lines. Only comment complex logic or business decisions.\n"
+            "- Use natural, domain-specific variable and function names (avoid generic names like `temp_data_dict` or `process_item_obj`).\n"
+            "- Maintain clean modular structure, proper error handling, and standard formatting.\n\n"
+            f"Workspace Context:\n{context}\n\n"
+            f"Critic/Tester Feedback to address:\n{currentFeedback}"
         )
         
         coderAgent = create_agent(
@@ -82,6 +87,10 @@ def runAgent(instruction):
         toolResults = executeToolCalls(coderResponse, tools)
         for tr in toolResults:
             print(tr)
+        
+        if toolResults:
+            print("Reindexing workspace after code modifications...")
+            indexWorkspace()
         
         print(f"\nCritic iteration {i+1}")
         criticPretext = (
@@ -107,12 +116,21 @@ def runAgent(instruction):
             "messages": [{"role": "user", "content": criticInstruction}]
         })
         
-        criticMessage = extractText(criticResponse["messages"][-1].content)
-        print("Critic output:", criticMessage)
-        
         criticToolResults = executeToolCalls(criticResponse, tools)
         for tr in criticToolResults:
             print(tr)
+
+        if criticToolResults:
+            criticResponse = criticAgent.invoke({
+                "messages": [
+                    {"role": "user", "content": criticInstruction},
+                    {"role": "assistant", "content": extractText(criticResponse["messages"][-1].content)},
+                    {"role": "user", "content": "File inspection results:\n" + "\n".join(criticToolResults) + "\n\nEvaluate the file contents above. Respond with PASS or FAIL."}
+                ]
+            })
+
+        criticMessage = extractText(criticResponse["messages"][-1].content)
+        print("Critic output:", criticMessage)
         
         if not criticMessage.strip().upper().startswith("PASS"):
             currentFeedback = f"Critic Feedback:\n{criticMessage}"
@@ -134,19 +152,31 @@ def runAgent(instruction):
         
         testerInstruction = (
             f"Original Instruction: {instruction}\n"
-            "The code has been written and passed visual review. Now, execute the relevant files or tests to ensure it runs without crashing."
+            f"Coder Output / Changes: {coderMessage}\n"
+            f"Coder Tool Execution Results: {toolResults}\n"
+            f"Critic Evaluation: {criticMessage}\n\n"
+            "Use the executeCommand tool to run the created/modified files to verify functionality."
         )
         
         testerResponse = testerAgent.invoke({
             "messages": [{"role": "user", "content": testerInstruction}]
         })
         
-        testerMessage = extractText(testerResponse["messages"][-1].content)
-        print("Tester output:", testerMessage)
-        
         testerToolResults = executeToolCalls(testerResponse, tools)
         for tr in testerToolResults:
             print(tr)
+
+        if testerToolResults:
+            testerResponse = testerAgent.invoke({
+                "messages": [
+                    {"role": "user", "content": testerInstruction},
+                    {"role": "assistant", "content": extractText(testerResponse["messages"][-1].content)},
+                    {"role": "user", "content": "Terminal execution output:\n" + "\n".join(testerToolResults) + "\n\nEvaluate the actual terminal execution output above. Respond strictly with PASS or FAIL followed by details if failed."}
+                ]
+            })
+        
+        testerMessage = extractText(testerResponse["messages"][-1].content)
+        print("Tester output:", testerMessage)
         
         if testerMessage.strip().upper().startswith("PASS"):
             print("\nProcess finished successfully.")
@@ -170,7 +200,5 @@ if __name__ == "__main__":
             indexWorkspace()
             print("Reindexed the workspace")
         elif q:
-            import asyncio
-            from agents.planner import Planner
             planner = Planner()
             asyncio.run(planner.run(query))
