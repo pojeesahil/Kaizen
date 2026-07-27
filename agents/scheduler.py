@@ -10,6 +10,7 @@ class Scheduler:
         self.dag = dag
         self.goal = goal
         self.queue: list[tuple[int, str]] = []
+        self.taskOutputs: dict[str, str] = {}
 
     def load_ready_tasks(self) -> None:
 
@@ -25,13 +26,26 @@ class Scheduler:
 
         from main import runAgent
 
+        dependencyContext = ""
+        for depId in task.dependencies:
+            if depId in self.taskOutputs:
+                dependencyContext += f"\n- Parent task '{depId}' output: {self.taskOutputs[depId]}"
+
         instruction = f"Overall Goal: {self.goal}\nTask: {task.name}" if self.goal else task.name
-        success = runAgent(instruction)
+        runResult = runAgent(instruction, taskContext=dependencyContext)
+
+        if isinstance(runResult, tuple):
+            success, outputSummary = runResult
+        else:
+            success, outputSummary = bool(runResult), f"{task.name} completed."
+
+        if success:
+            self.taskOutputs[task.id] = outputSummary
 
         return TaskResult(
             task_id=task.id,
             success=True if success is None or success else False,
-            message=f"{task.name} completed."
+            message=outputSummary
         )
 
     async def run(self) -> None:
