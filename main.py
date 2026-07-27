@@ -5,7 +5,9 @@ from core.tools import tools
 from rag.rag import indexWorkspace, getContext
 import asyncio
 from agents.planner import Planner
-
+import asyncio
+from agents.prompt import PromptAgent
+from agents.planner import Planner
 def extractText(content) -> str:
     if isinstance(content, str):
         return content
@@ -50,7 +52,7 @@ def executeToolCalls(response, tools_list):
                 pass
     return executed
 
-def runAgent(instruction):
+def runAgent(instruction, taskContext=""):
     context = getContext(instruction)
     
     maxIters = 4
@@ -67,6 +69,7 @@ def runAgent(instruction):
             "- Use natural, domain-specific variable and function names (avoid generic names like `temp_data_dict` or `process_item_obj`).\n"
             "- Maintain clean modular structure, proper error handling, and standard formatting.\n\n"
             f"Workspace Context:\n{context}\n\n"
+            f"Prerequisite Tasks Context:\n{taskContext if taskContext else 'None'}\n\n"
             f"Critic/Tester Feedback to address:\n{currentFeedback}"
         )
         
@@ -180,14 +183,14 @@ def runAgent(instruction):
         
         if testerMessage.strip().upper().startswith("PASS"):
             print("\nProcess finished successfully.")
-            return True
+            return True, coderMessage
         else:
             currentFeedback = f"Tester Execution Failed:\n{testerMessage}"
             
         if i == maxIters - 1:
             print("\nReached max iterations.")
     print(" ")
-    return False
+    return False, currentFeedback
 
 if __name__ == "__main__":
     print("Type 'index' for reindexing or 'exit' to quit.")
@@ -200,5 +203,9 @@ if __name__ == "__main__":
             indexWorkspace()
             print("Reindexed the workspace")
         elif q:
+            promptAgent = PromptAgent()
+            enhancedPrompt = promptAgent.run(query)
+            enhancedRequest = enhancedPrompt.get("enhanced_request", query)
+            
             planner = Planner()
-            asyncio.run(planner.run(query))
+            asyncio.run(planner.run(enhancedRequest))
