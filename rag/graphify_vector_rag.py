@@ -1,9 +1,11 @@
-# combines vector db + knowledge graph for better retrieval
+
 import os
 from rag.interface import RAGInterface
 from rag.vector_store import VectorStore, read_and_chunk_codebase
 from rag.graph_rag import GraphRAG
-
+import shutil
+import subprocess
+import sys
 
 class GraphifyVectorRAG(RAGInterface):
     """The real RAG - uses chromadb for semantic search + graphify for structure."""
@@ -17,9 +19,7 @@ class GraphifyVectorRAG(RAGInterface):
         self.indexed_path = os.path.abspath(path)
 
         print("running graphify on workspace...")
-        import shutil
-        import subprocess
-        import sys
+        
 
         graphify_cmd = shutil.which("graphify")
         if graphify_cmd:
@@ -43,7 +43,7 @@ class GraphifyVectorRAG(RAGInterface):
                 shutil.rmtree(root_gpath, ignore_errors=True)
             shutil.move(work_gpath, root_gpath)
 
-        # index into vector db
+        
         print("indexing into vector db...")
         self.vector_store.clear()
         docs, metas, ids = read_and_chunk_codebase(path)
@@ -51,7 +51,7 @@ class GraphifyVectorRAG(RAGInterface):
             self.vector_store.add_documents(docs, metas, ids)
         print(f"  {self.vector_store.count()} chunks stored")
 
-        # load graph from root output directory outside work/
+        
         gpath = os.path.join(root_gpath, "graph.json")
         if os.path.exists(gpath):
             print(f"loading knowledge graph from {gpath}...")

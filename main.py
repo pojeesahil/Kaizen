@@ -59,7 +59,7 @@ def runAgent(instruction, taskContext=""):
     currentFeedback = "No feedback yet. This is your first attempt."
     
     for i in range(maxIters):
-        time.sleep(2)
+        time.sleep(0.5)
         print(f"\nCoder iteration {i+1}")
         coderPretext = (
             "You are a senior software engineer with tools to modify the workspace.\n"
