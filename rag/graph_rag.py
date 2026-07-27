@@ -1,4 +1,3 @@
-# reads graphify's graph.json and lets us query it
 import json
 import os
 
@@ -20,7 +19,6 @@ class GraphRAG:
         with open(graph_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # build node lookup
         for n in data.get("nodes", []):
             nid = n.get("id", "")
             self.nodes[nid] = {
@@ -32,7 +30,6 @@ class GraphRAG:
                 "community": n.get("community", -1)
             }
 
-        # build edge list
         self.edges = []
         for e in data.get("edges", []):
             self.edges.append({
@@ -41,14 +38,12 @@ class GraphRAG:
                 "type": e.get("type", "related")
             })
 
-        # build adjacency list
         self.neighbors = {}
         for e in self.edges:
             s, t = e["source"], e["target"]
             self.neighbors.setdefault(s, []).append(t)
             self.neighbors.setdefault(t, []).append(s)
 
-        # group by community
         self.communities = {}
         for nid, nd in self.nodes.items():
             c = nd["community"]
