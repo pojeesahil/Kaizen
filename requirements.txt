@@ -5,6 +5,7 @@ langchain-text-splitters
 langchain-google-genai
 langchain-chroma
 langchain-ollama
+langgraph
 python-dotenv
 chromadb
 networkx
