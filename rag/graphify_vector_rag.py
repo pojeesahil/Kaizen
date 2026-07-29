@@ -1,8 +1,11 @@
+
 import os
 from rag.interface import RAGInterface
 from rag.vector_store import VectorStore, read_and_chunk_codebase
 from rag.graph_rag import GraphRAG
-
+import shutil
+import subprocess
+import sys
 
 class GraphifyVectorRAG(RAGInterface):
 
@@ -15,9 +18,7 @@ class GraphifyVectorRAG(RAGInterface):
         self.indexed_path = os.path.abspath(path)
 
         print("running graphify on workspace...")
-        import shutil
-        import subprocess
-        import sys
+        
 
         graphify_cmd = shutil.which("graphify")
         if graphify_cmd:
