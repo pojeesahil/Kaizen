@@ -8,7 +8,6 @@ import subprocess
 import sys
 
 class GraphifyVectorRAG(RAGInterface):
-    """The real RAG - uses chromadb for semantic search + graphify for structure."""
 
     def __init__(self, persist_dir="./chroma_db"):
         self.vector_store = VectorStore(persist_dir=persist_dir)
@@ -43,7 +42,6 @@ class GraphifyVectorRAG(RAGInterface):
                 shutil.rmtree(root_gpath, ignore_errors=True)
             shutil.move(work_gpath, root_gpath)
 
-        
         print("indexing into vector db...")
         self.vector_store.clear()
         docs, metas, ids = read_and_chunk_codebase(path)
@@ -51,7 +49,6 @@ class GraphifyVectorRAG(RAGInterface):
             self.vector_store.add_documents(docs, metas, ids)
         print(f"  {self.vector_store.count()} chunks stored")
 
-        
         gpath = os.path.join(root_gpath, "graph.json")
         if os.path.exists(gpath):
             print(f"loading knowledge graph from {gpath}...")
@@ -63,12 +60,10 @@ class GraphifyVectorRAG(RAGInterface):
         results = []
         seen = set()
 
-        # vector search first
         for r in self.vector_store.search(query, top_k=top_k):
             results.append(r)
             seen.add(r["file_path"])
 
-        # if graph is loaded, expand context using graph relationships
         if self.graph.nodes:
             matches = self.graph.search_nodes(query)
             for m in matches[:3]:
@@ -78,7 +73,7 @@ class GraphifyVectorRAG(RAGInterface):
                     if fp and fp not in seen:
                         extra = self.vector_store.search(rel.get("label", ""), top_k=1)
                         if extra:
-                            extra[0]["score"] *= 0.8  # lower priority than direct matches
+                            extra[0]["score"] *= 0.8
                             results.append(extra[0])
                             seen.add(fp)
 
