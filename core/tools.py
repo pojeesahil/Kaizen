@@ -3,16 +3,20 @@ from pathlib import Path
 from langchain_core.tools import tool
 import subprocess
 
-WORK_DIR = Path("work")
+WORK_DIR = Path(__file__).resolve().parent.parent / "work"
 
 def resolvePath(path: str) -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    p = Path(path)
-    if p.is_absolute():
-        return p
-    if p.parts and p.parts[0] == "work":
-        return p.resolve()
-    return (WORK_DIR / p).resolve()
+    targetPath = Path(path)
+    
+    if targetPath.is_absolute():
+        return targetPath
+        
+    parts = [p for p in targetPath.parts if p not in ("work", ".")]
+    if parts:
+        return (WORK_DIR / Path(*parts)).resolve()
+        
+    return (WORK_DIR / targetPath.name).resolve()
 
 @tool
 def createFile(path: str, content: str) -> str:
