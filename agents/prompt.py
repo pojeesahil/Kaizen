@@ -6,7 +6,7 @@ from langchain_ollama import ChatOllama
 class PromptAgent:
 
     def __init__(self):
-        self.llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0, format="json")
+        self.llm = ChatOllama(model = "qwen2.5-coder:7b", temperature = 0, format = "json")
 
     def detect_intent(self, request: str) -> str:
         request = request.lower()
@@ -45,41 +45,47 @@ class PromptAgent:
             print("Invalid choice. Try again.")
 
     def collect_preferences(self, request: str) -> dict:
+
         request = request.lower()
         preferences = {}
 
-        if any(word in request for word in ["web", "website", "dashboard", "frontend", "backend", "api", "chatbot", "authentication"]):
-            preferences["backend"] = self.ask_choice(
-                "Choose Backend Framework",
-                ["FastAPI", "Flask", "Django", "No Preference"]
-            )
+        if any(word in request for word in [
+            "api",
+            "backend",
+            "authentication",
+            "database",
+            "fastapi",
+            "flask",
+            "django"
+        ]):
 
-        if any(word in request for word in ["database", "backend", "authentication"]):
-            preferences["database"] = self.ask_choice(
-                "Choose Database",
-                ["PostgreSQL", "MongoDB", "MySQL", "SQLite", "No Preference"]
-            )
+            preferences["backend"] = self.ask_choice("Choose Backend Framework", ["FastAPI", "Flask", "Django", "No Preference"])
+
+        if any(word in request for word in ["database", "authentication"]):
+
+            preferences["database"] = self.ask_choice("Choose Database", ["PostgreSQL", "MongoDB", "MySQL", "SQLite", "No Preference"])
 
         if "deploy" in request:
-            preferences["deployment"] = self.ask_choice(
-                "Choose Deployment",
-                ["Docker", "Railway", "Render", "AWS", "No Preference"]
-            )
+
+            preferences["deployment"] = self.ask_choice("Choose Deployment Platform", ["Docker", "Railway", "Render", "AWS", "No Preference"])
 
         return preferences
 
     def enhance_prompt(self, request: str, intent: str, preferences: dict) -> dict:
+
         prompt = f"""
 You are the Prompt Agent of KAIZEN.
 
-Your ONLY job is to improve the user's software development request.
+Your job is to rewrite the user's software request so it is clear, complete and easy for another AI Planner Agent to understand.
 
-Do NOT generate tasks.
-Do NOT generate execution plans.
+Rules:
 
-Use the user's selected preferences.
-
-Return ONLY valid JSON.
+- Do NOT create tasks.
+- Do NOT create an execution plan.
+- Do NOT explain anything.
+- Keep the user's original intent.
+- Include the user's selected preferences naturally.
+- Return ONLY valid JSON.
 
 Output Format:
 
@@ -95,32 +101,38 @@ User Request:
 Intent:
 {intent}
 
-User Preferences:
-{json.dumps(preferences, indent=2)}
+Preferences:
+{json.dumps(preferences, indent = 2)}
 """
 
         response = self.llm.invoke([
-            SystemMessage(content="You improve software development prompts."),
-            HumanMessage(content=prompt)
-        ])
+            SystemMessage(content = "You improve software development requests."), HumanMessage(content = prompt)])
 
         result = json.loads(response.content)
+
         result["preferences"] = preferences
+
         return result
 
     def run(self, request: str) -> dict:
 
         intent = self.detect_intent(request)
+
         print(f"Detected Intent : {intent}")
 
         preferences = self.collect_preferences(request)
+
         result = self.enhance_prompt(request, intent, preferences)
 
         print("\nEnhanced Prompt Generated\n")
+
         return result
 
 
 if __name__ == "__main__":
+
     agent = PromptAgent()
+
     result = agent.run(input("Enter your request: "))
-    print(json.dumps(result, indent=4))
+
+    print(json.dumps(result, indent = 4))
