@@ -7,13 +7,19 @@ from langchain_ollama import ChatOllama
 from agents.dag import DAG
 from agents.models import TaskNode
 from agents.scheduler import Scheduler
+from agents.prompt import PromptAgent
 from rag.rag import getContext
 
 
 class Planner:
 
     def __init__(self):
-        self.llm = ChatOllama(model = "qwen2.5-coder:7b", temperature = 0, format = "json")
+        self.llm = ChatOllama(
+            model="qwen2.5-coder:7b",
+            temperature=0,
+            format="json"
+        )
+        self.prompt_agent = PromptAgent()
         self.state = {"goal": "", "completed": [], "failed": []}
 
     def detect_intent(self, request: str) -> str:
@@ -43,76 +49,132 @@ class Planner:
         return "general"
 
     def generate_plan(self, request: str, intent: str, context: str = "") -> list[dict]:
+
         prompt = f"""
-        You are the Planner Agent of an AI coding assistant. Break the user's request into 3-10 small executable tasks.
+You are the Planner Agent of KAIZEN.
 
-        Rules:
-        - Return ONLY valid JSON.
-        - Do NOT explain anything.
-        - Do NOT use markdown.
-        - Do NOT wrap the output inside ```json.
-        - The output MUST be a JSON array.
-        - Even if there is only one task, return a JSON array.
-        - Every task must be atomic.
-        - Add dependencies where required.
+Your ONLY job is to convert the user's request into a list of executable software development tasks.
 
-        Each task MUST contain:
+Rules:
 
-        id
-        name
-        agent
-        priority
-        dependencies
-        tools
+- Return ONLY valid JSON.
+- Do NOT explain anything.
+- Do NOT use markdown.
+- Return ONLY a JSON array.
+- Generate between 3 and 10 tasks whenever possible.
+- Every task must represent ONE independently executable unit of work.
+- Every task should produce ONE logical deliverable.
+- Add dependencies only when necessary.
 
-        Priority:
-        1 = High
-        2 = Medium
-        3 = Low
+Always split the request if it contains:
 
-        Example:
+- Multiple pages
+- Multiple files
+- Multiple APIs
+- Multiple endpoints
+- Multiple components
+- Multiple modules
+- Multiple services
+- Multiple classes
+- Multiple database tables
+- Multiple screens
 
-        [
-        {{
-            "id":"backend",
-            "name":"Build Backend",
-            "agent":"Coding",
-            "priority":1,
-            "dependencies":[],
-            "tools":["filesystem","terminal"]
-        }},
-        {{
-            "id":"frontend",
-            "name":"Build Frontend",
-            "agent":"Coding",
-            "priority":1,
-            "dependencies":[],
-            "tools":["filesystem"]
-        }},
-        {{
-            "id":"testing",
-            "name":"Run Tests",
-            "agent":"Testing",
-            "priority":2,
-            "dependencies":["backend","frontend"],
-            "tools":["terminal"]
-        }}
-        ]
+Examples
 
-        Codebase Context:
-        {context if context else 'No existing context available.'}
+User:
+Create three HTML pages.
 
-        User Request:
-        {request}
+Correct:
 
-        Intent:
-        {intent}
-        """
+[
+    {{
+        "id":"page1",
+        "name":"Create page1.html",
+        "agent":"Coding",
+        "priority":1,
+        "dependencies":[],
+        "tools":["filesystem"]
+    }},
+    {{
+        "id":"page2",
+        "name":"Create page2.html",
+        "agent":"Coding",
+        "priority":1,
+        "dependencies":[],
+        "tools":["filesystem"]
+    }},
+    {{
+        "id":"page3",
+        "name":"Create page3.html",
+        "agent":"Coding",
+        "priority":1,
+        "dependencies":[],
+        "tools":["filesystem"]
+    }}
+]
+
+User:
+Create login page, signup page and dashboard.
+
+Correct:
+
+[
+    {{
+        "id":"login",
+        "name":"Create Login Page",
+        "agent":"Coding",
+        "priority":1,
+        "dependencies":[],
+        "tools":["filesystem"]
+    }},
+    {{
+        "id":"signup",
+        "name":"Create Signup Page",
+        "agent":"Coding",
+        "priority":1,
+        "dependencies":[],
+        "tools":["filesystem"]
+    }},
+    {{
+        "id":"dashboard",
+        "name":"Create Dashboard",
+        "agent":"Coding",
+        "priority":1,
+        "dependencies":[],
+        "tools":["filesystem"]
+    }}
+]
+
+Every task MUST contain:
+
+- id
+- name
+- agent
+- priority
+- dependencies
+- tools
+
+Priority:
+
+1 = High
+2 = Medium
+3 = Low
+
+Codebase Context:
+
+{context if context else "No existing context available."}
+
+User Request:
+
+{request}
+
+Intent:
+
+{intent}
+"""
 
         response = self.llm.invoke([
-            SystemMessage(content = "You are an expert software planning agent that ONLY outputs JSON."),
-            HumanMessage(content = prompt)
-        ])
+            SystemMessage(content="You are an expert software planning agent. Return ONLY valid JSON."), HumanMessage(content=prompt)])
 
         content = response.content.strip()
 
@@ -134,31 +196,40 @@ class Planner:
         for item in plan:
             dag.add_task(
                 TaskNode(
-                    id=item["id"],
-                    name=item["name"],
-                    agent=item["agent"],
-                    priority=item["priority"],
-                    dependencies=item.get("dependencies", []),
-                    tools=item.get("tools", [])
+                    id = item["id"],
+                    name = item["name"],
+                    agent = item["agent"],
+                    priority = item["priority"],
+                    dependencies = item.get("dependencies", []),
+                    tools = item.get("tools", [])
                 )
             )
 
         dag.build()
         dag.topological_sort()
+
         return dag
 
     async def run(self, request: str):
+
         self.state["goal"] = request
 
         print(f"\nUser Request : {request}")
 
-        intent = self.detect_intent(request)
+        enhanced = self.prompt_agent.run(request)
+
+        enhanced_request = enhanced["enhanced_request"]
+        intent = enhanced["intent"]
+
+        print(f"\nEnhanced Request : {enhanced_request}")
         print(f"Intent : {intent}")
 
-        context = getContext(request)
-        plan = self.generate_plan(request, intent, context)
+        context = getContext(enhanced_request)
+
+        plan = self.generate_plan(enhanced_request, intent, context)
 
         print("\nGenerated Tasks")
+
         for task in plan:
             print(f" - {task['name']}")
 
@@ -167,16 +238,19 @@ class Planner:
         print("\nExecution Order")
         print(dag.topological_sort())
 
-        scheduler = Scheduler(dag, request)
+        scheduler = Scheduler(dag, enhanced_request)
+
         await scheduler.run()
 
         print("\nWorkflow Finished")
 
 
 if __name__ == "__main__":
+
     planner = Planner()
+
     asyncio.run(
         planner.run(
-            "Build a full-stack authentication system with documentation and tests."
+            input("Enter your request: ")
         )
     )

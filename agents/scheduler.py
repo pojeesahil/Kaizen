@@ -44,8 +44,8 @@ class Scheduler:
 
         return TaskResult(
             task_id=task.id,
-            success=True if success is None or success else False,
-            message=outputSummary
+            success = True if success is None or success else False,
+            message = outputSummary
         )
 
     async def run(self) -> None:
