@@ -80,7 +80,6 @@ class AgentState(TypedDict):
 
 def coderNode(state: AgentState) -> dict:
     iteration = state["iteration"] + 1
-    time.sleep(0.5)
     print(f"\nCoder iteration {iteration}")
     
     coderPretext = (
