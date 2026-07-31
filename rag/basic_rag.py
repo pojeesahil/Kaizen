@@ -1,4 +1,3 @@
-# simple keyword based rag - no external deps needed
 import os
 from rag.interface import RAGInterface
 

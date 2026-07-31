@@ -1,6 +1,3 @@
-from rag.interface import RAGInterface
-
-
 def create_rag(mode="basic"):
     """mode = 'basic' for keyword rag, 'graphify' for vector+graph rag"""
     if mode == "basic":
