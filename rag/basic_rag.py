@@ -7,7 +7,7 @@ SUPPORTED_EXTENSIONS = [
     ".html", ".css", ".json", ".yaml", ".yml", ".md"
 ]
 
-SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv"}
+SKIP_DIRS = {"__pycache__", "venv", ".git", ".venv"}
 
 
 class BasicRAG(RAGInterface):

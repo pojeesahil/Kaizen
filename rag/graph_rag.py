@@ -3,7 +3,6 @@ import os
 
 
 class GraphRAG:
-    """Loads and queries the knowledge graph that graphify builds."""
 
     def __init__(self):
         self.nodes = {}
@@ -53,7 +52,7 @@ class GraphRAG:
         return True
 
     def find_related(self, node_id, depth=1):
-        """BFS from node_id up to `depth` hops. Returns list of node dicts."""
+
         if node_id not in self.nodes:
             return []
 
@@ -73,7 +72,7 @@ class GraphRAG:
         return [self.nodes[n] for n in visited if n in self.nodes]
 
     def search_nodes(self, query):
-        """keyword search over node labels and descriptions"""
+
         words = query.lower().split()
         results = []
 
@@ -89,7 +88,7 @@ class GraphRAG:
         return results
 
     def get_community_nodes(self, node_id):
-        """get all nodes in same community as given node"""
+
         if node_id not in self.nodes:
             return []
         comm = self.nodes[node_id]["community"]
