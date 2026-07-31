@@ -70,7 +70,7 @@ def streamInvoke(model, messages):
         if chunk.content:
             print(chunk.content, end="", flush=True)
         fullResponse = chunk if fullResponse is None else fullResponse + chunk
-    print()
+    print("\n")
     return fullResponse
 
 class AgentState(TypedDict):
@@ -87,7 +87,7 @@ class AgentState(TypedDict):
 def coderNode(state: AgentState) -> dict:
     iteration = state["iteration"] + 1
     time.sleep(0.5)
-    print(f"\nCoder iteration {iteration}")
+    print(f"\n--- Coder Iteration {iteration} ---")
     
     coderPretext = (
         "You are an autonomous senior software engineer with workspace tools.\n\n"
@@ -112,10 +112,10 @@ def coderNode(state: AgentState) -> dict:
     
     toolResults = executeToolCalls(coderResponse, tools)
     for tr in toolResults:
-        print(tr)
+        print(f"{tr}\n")
         
     if toolResults:
-        print("Reindexing workspace after code modifications...")
+        print("Reindexing workspace after code modifications...\n")
         indexWorkspace()
         
     return {
@@ -126,7 +126,7 @@ def coderNode(state: AgentState) -> dict:
     }
 
 def criticNode(state: AgentState) -> dict:
-    print(f"\nCritic iteration {state['iteration']}")
+    print(f"\n--- Critic Iteration {state['iteration']} ---")
     criticPretext = (
         "You are an expert Code Critic. Verify the code changes logically and structurally.\n"
         "You can use the readFile tool to inspect the file contents.\n"
@@ -143,7 +143,7 @@ def criticNode(state: AgentState) -> dict:
     criticResponse = streamInvoke(agentModel, [SystemMessage(content=criticPretext)] + state["messages"] + [HumanMessage(content=criticInstruction)])
     criticToolResults = executeToolCalls(criticResponse, tools)
     for tr in criticToolResults:
-        print(tr)
+        print(f"{tr}\n")
         
     if criticToolResults:
         criticResponse = streamInvoke(agentModel, [
@@ -162,7 +162,7 @@ def criticNode(state: AgentState) -> dict:
     }
 
 def testerNode(state: AgentState) -> dict:
-    print(f"\nTester iteration {state['iteration']}")
+    print(f"\n--- Tester Iteration {state['iteration']} ---")
     testerPretext = (
         "You are a strict QA Automation Engineer.\n"
         "Your job is to verify that code works:\n"
@@ -181,7 +181,7 @@ def testerNode(state: AgentState) -> dict:
     testerResponse = streamInvoke(agentModel, [SystemMessage(content=testerPretext)] + state["messages"] + [HumanMessage(content=testerInstruction)])
     testerToolResults = executeToolCalls(testerResponse, tools)
     for tr in testerToolResults:
-        print(tr)
+        print(f"{tr}\n")
         
     if testerToolResults:
         testerResponse = streamInvoke(agentModel, [
@@ -195,7 +195,7 @@ def testerNode(state: AgentState) -> dict:
     
     isPass = testerMessage.strip().upper().startswith("PASS")
     if isPass:
-        print("\nProcess finished successfully.")
+        print("\nProcess finished successfully.\n")
         
     return {
         "messages": [testerResponse],
@@ -245,9 +245,9 @@ def runAgent(instruction, taskContext=""):
     return False, finalState.get("feedback", "Execution failed")
 
 if __name__ == "__main__":
-    print("Type 'index' for reindexing or 'exit' to quit.")
+    print("\nType 'index' for reindexing or 'exit' to quit.\n")
     while True:
-        query = input("Instruction: ")
+        query = input("\nInstruction: ")
         q = query.strip().lower()
         if q == "exit":
             break
