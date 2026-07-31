@@ -1,4 +1,3 @@
-# base class so both basic and real rag follow same structure
 from abc import ABC, abstractmethod
 
 class RAGInterface(ABC):

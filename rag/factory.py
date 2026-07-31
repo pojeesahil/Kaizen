@@ -1,4 +1,3 @@
-# factory to switch between basic and real rag
 from rag.interface import RAGInterface
 
 

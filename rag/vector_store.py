@@ -1,4 +1,3 @@
-# chromadb wrapper for storing and searching code embeddings
 import os
 import chromadb
 from chromadb.utils import embedding_functions
@@ -13,7 +12,6 @@ SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db"
 
 
 class VectorStore:
-    """Thin wrapper over ChromaDB - handles add, search, clear."""
 
     def __init__(self, collection_name="codebase", persist_dir="./chroma_db"):
         self.client = chromadb.PersistentClient(path=persist_dir)
@@ -24,7 +22,7 @@ class VectorStore:
         )
 
     def add_documents(self, documents, metadatas, ids):
-        # chromadb chokes on big batches so we do 500 at a time
+
         for i in range(0, len(documents), 500):
             self.collection.add(
                 documents=documents[i:i+500],
@@ -48,7 +46,7 @@ class VectorStore:
             results.append({
                 "content": raw["documents"][0][i],
                 "file_path": raw["metadatas"][0][i].get("file_path", "unknown"),
-                "score": round(1.0 / (1.0 + dist), 4)  # convert distance to score
+                "score": round(1.0 / (1.0 + dist), 4)
             })
         return results
 
