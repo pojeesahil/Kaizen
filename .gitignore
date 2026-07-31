@@ -6,3 +6,5 @@ graphify-out/
 chroma_db/
 work/
 chroma_db/chroma.sqlite3
+network.html
+rag/graph_visualize.py

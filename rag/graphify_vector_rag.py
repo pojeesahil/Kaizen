@@ -20,11 +20,8 @@ class GraphifyVectorRAG(RAGInterface):
         print("running graphify on workspace...")
         
 
-        graphify_cmd = shutil.which("graphify")
-        if graphify_cmd:
-            cmd = [graphify_cmd, path]
-        else:
-            cmd = [sys.executable, "-m", "graphify", path]
+        abs_path = os.path.abspath(path)
+        cmd = [sys.executable, "-m", "graphify", abs_path, "--code-only"]
 
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, shell=(os.name == "nt"))
@@ -49,10 +46,13 @@ class GraphifyVectorRAG(RAGInterface):
             self.vector_store.add_documents(docs, metas, ids)
         print(f"  {self.vector_store.count()} chunks stored")
 
-        gpath = os.path.join(root_gpath, "graph.json")
-        if os.path.exists(gpath):
-            print(f"loading knowledge graph from {gpath}...")
-            self.graph.load_graph(gpath)
+        gpath_root = os.path.join(root_gpath, "graph.json")
+        gpath_work = os.path.join(work_gpath, "graph.json")
+        target_gpath = gpath_root if os.path.exists(gpath_root) else (gpath_work if os.path.exists(gpath_work) else None)
+
+        if target_gpath:
+            print(f"loading knowledge graph from {target_gpath}...")
+            self.graph.load_graph(target_gpath)
         else:
             print("no graph found (run graphify to enable graph features)")
 

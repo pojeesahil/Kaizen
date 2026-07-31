@@ -34,11 +34,14 @@ def executeToolCalls(response, tools_list):
             tname = tc.get("name")
             targs = tc.get("args", {})
             if tname in toolMap:
-                res = toolMap[tname].invoke(targs)
-                executed.append(f"Tool {tname} executed: {res}")
+                try:
+                    res = toolMap[tname].invoke(targs)
+                    executed.append(f"Tool {tname} executed: {res}")
+                except Exception as err:
+                    executed.append(f"Tool {tname} execution error: {err}")
     if not executed:
         text = extractText(response.content).strip()
-        decoder = json.JSONDecoder()
+        decoder = json.JSONDecoder(strict=False)
         idx = 0
         while idx < len(text):
             start = text.find("{", idx)
@@ -49,8 +52,11 @@ def executeToolCalls(response, tools_list):
                 tname = data.get("name")
                 targs = data.get("arguments") or data.get("args") or {}
                 if tname in toolMap:
-                    res = toolMap[tname].invoke(targs)
-                    executed.append(f"Tool {tname} executed: {res}")
+                    try:
+                        res = toolMap[tname].invoke(targs)
+                        executed.append(f"Tool {tname} executed: {res}")
+                    except Exception as err:
+                        executed.append(f"Tool {tname} execution error: {err}")
                 idx = start + max(end_offset, 1)
             except Exception:
                 idx = start + 1
@@ -84,12 +90,18 @@ def coderNode(state: AgentState) -> dict:
     print(f"\nCoder iteration {iteration}")
     
     coderPretext = (
-        "You are a senior software engineer with tools to modify the workspace.\n"
-        "Write production-grade code that looks authentic and handcrafted by an experienced developer:\n"
-        "- Write clean, idiomatic, and concise code without AI boilerplate or generic templates.\n"
-        "- Avoid robotic/redundant comments explaining obvious code lines. Only comment complex logic or business decisions.\n"
-        "- Use natural, domain-specific variable and function names (avoid generic names like `temp_data_dict` or `process_item_obj`).\n"
-        "- Maintain clean modular structure, proper error handling, and standard formatting.\n\n"
+        "You are an autonomous senior software engineer with workspace tools.\n\n"
+        "CRITICAL TOOL RULES:\n"
+        "1. You MUST use tool calls to write or modify files in the workspace.\n"
+        "2. DO NOT respond with markdown code blocks (```python ... ```) or conversational explanations.\n"
+        "3. Output ONLY valid tool calls matching the tool format below.\n\n"
+        "Tool Call Format Examples:\n"
+        'To create a file:\n{"name": "createFile", "arguments": {"path": "filename.ext", "content": "code..."}}\n\n'
+        'To edit a file:\n{"name": "editFile", "arguments": {"path": "filename.ext", "newContent": "updated code..."}}\n\n'
+        "Code Guidelines:\n"
+        "- Write clean, idiomatic, production-grade code without generic templates or redundant comments.\n"
+        "- Use natural, domain-specific variable and function names.\n"
+        "- Maintain clean modular structure and standard formatting.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
         f"Prerequisite Tasks Context:\n{state['taskContext'] if state['taskContext'] else 'None'}\n\n"
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
