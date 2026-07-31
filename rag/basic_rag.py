@@ -1,4 +1,3 @@
-# simple keyword based rag - no external deps needed
 import os
 from rag.interface import RAGInterface
 
@@ -8,19 +7,19 @@ SUPPORTED_EXTENSIONS = [
     ".html", ".css", ".json", ".yaml", ".yml", ".md"
 ]
 
-SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv"}
+SKIP_DIRS = {"__pycache__", "venv", ".git", ".venv"}
 
 
 class BasicRAG(RAGInterface):
 
     def __init__(self):
-        self.chunks = []  # stores {"content": ..., "file_path": ...}
+        self.chunks = []
 
     def index_codebase(self, path):
         self.chunks = []
 
         for root, dirs, files in os.walk(path):
-            # skip hidden and junk dirs
+
             dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
 
             for fname in files:
@@ -35,7 +34,7 @@ class BasicRAG(RAGInterface):
                 except:
                     continue
 
-                # split file into chunks of ~50 lines each
+
                 self._chunk_file(text, fpath)
 
         print(f"[BasicRAG] indexed {len(self.chunks)} chunks from {path}")
@@ -52,13 +51,11 @@ class BasicRAG(RAGInterface):
                     self.chunks.append({"content": chunk, "file_path": fpath})
                 buf = []
 
-        # leftover lines
         if buf:
             chunk = "\n".join(buf)
             if chunk.strip():
                 self.chunks.append({"content": chunk, "file_path": fpath})
 
-        # tiny file that didnt get chunked
         if not self.chunks and text.strip():
             self.chunks.append({"content": text, "file_path": fpath})
 
