@@ -163,42 +163,72 @@ def criticNode(state: AgentState) -> dict:
 
 def testerNode(state: AgentState) -> dict:
     print(f"\n--- Tester Iteration {state['iteration']} ---")
-    testerPretext = (
-        "You are a strict QA Automation Engineer.\n"
-        "Your job is to verify that code works:\n"
-        "- For runnable scripts, backend code, or tests: Use executeCommand to run them in the terminal.\n"
-        "- For static files (HTML, CSS, JS, Markdown, JSON): If the files were created cleanly and passed visual review, respond starting strictly with 'PASS'.\n"
-        "- If execution fails or throws runtime errors, respond starting strictly with 'FAIL' followed by error details."
+    
+    genPretext = (
+        "You are an experienced QA engineer.\n"
+        "Review the codebase and recent modifications.\n"
+        "- If automated unit tests do not exist or require updating for the new code, generate or modify test files (e.g. test_*.py, *Test.java, *.test.js) using createFile or editFile.\n"
+        "- For documentation or static HTML/CSS where unit tests do not apply, respond strictly with STATIC_ONLY."
     )
-    testerInstruction = (
-        f"Original Instruction: {state['instruction']}\n"
-        f"Coder Output / Changes: {state.get('coderMessage', '')}\n"
-        f"Tool Execution Results: {state.get('toolResults', [])}\n"
-        f"Critic Evaluation: {state.get('criticMessage', '')}\n\n"
-        "Evaluate the changes. If runnable scripts exist, run them using executeCommand. Respond strictly starting with PASS or FAIL."
+    genPrompt = (
+        f"Instruction: {state['instruction']}\n"
+        f"Coder changes: {state.get('coderMessage', '')}\n"
+        f"Workspace files and context:\n{state.get('context', '')}\n\n"
+        "Generate or update required unit tests now."
     )
     
-    testerResponse = streamInvoke(agentModel, [SystemMessage(content=testerPretext)] + state["messages"] + [HumanMessage(content=testerInstruction)])
-    testerToolResults = executeToolCalls(testerResponse, tools)
-    for tr in testerToolResults:
+    genResponse = streamInvoke(agentModel, [SystemMessage(content=genPretext)] + state["messages"] + [HumanMessage(content=genPrompt)])
+    genTools = executeToolCalls(genResponse, tools)
+    for tr in genTools:
         print(f"{tr}\n")
         
-    if testerToolResults:
-        testerResponse = streamInvoke(agentModel, [
-            SystemMessage(content=testerPretext),
-            *state["messages"],
+    runPretext = (
+        "You are responsible for running test suites and verifying functionality.\n"
+        "- Run the appropriate tests in terminal using executeCommand (e.g. pytest, python -m unittest, npm test, or javac/java).\n"
+        "- Only use build tools (like mvn or gradle) if project config files like pom.xml exist. For standalone Java files, compile and run directly using javac and java.\n"
+        "- If execution fails due to missing modules or third-party dependencies, install the required library using executeCommand and re-run the tests.\n"
+        "- When all tests pass cleanly without errors, respond starting strictly with 'PASS'.\n"
+        "- If functional assertions or code bugs persist, respond starting strictly with 'FAIL' followed by what failed."
+    )
+    
+    runMessages = [
+        SystemMessage(content=runPretext),
+        *state["messages"],
+        genResponse,
+        HumanMessage(content="Execute the test suite now. Automatically install any missing dependencies if import errors occur.")
+    ]
+    
+    testerResponse = None
+    testerMessage = ""
+    
+    for attempt in range(1, 4):
+        if attempt > 1:
+            print(f"\n--- Tester Retry {attempt}/3 ---")
+        testerResponse = streamInvoke(agentModel, runMessages)
+        runTools = executeToolCalls(testerResponse, tools)
+        for tr in runTools:
+            print(tr,"\n")
+            
+        testerMessage = extractText(testerResponse.content)
+        
+        if not runTools:
+            break
+            
+        runMessages.extend([
             testerResponse,
-            HumanMessage(content="Terminal execution output:\n" + "\n".join(testerToolResults) + "\n\nEvaluate the actual terminal execution output above. Respond strictly with PASS or FAIL followed by details if failed.")
+            HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate the output. If missing imports caused errors, install them and re-test. If tests passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
         ])
         
-    testerMessage = extractText(testerResponse.content)
-    
+        if attempt == 3 and runTools:
+            testerResponse =streamInvoke(agentModel, runMessages)
+            testerMessage = extractText(testerResponse.content)
+            
     isPass = testerMessage.strip().upper().startswith("PASS")
     if isPass:
         print("\nProcess finished successfully.\n")
         
     return {
-        "messages": [testerResponse],
+        "messages": [testerResponse] if testerResponse else [genResponse],
         "feedback": state["feedback"] if isPass else f"Tester Execution Failed:\n{testerMessage}",
         "success": isPass
     }
