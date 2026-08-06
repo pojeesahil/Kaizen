@@ -5,7 +5,7 @@ from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage
-from core.config import llm
+from core.config import llm, get_llm
 from core.tools import tools
 from rag.rag import indexWorkspace, getContext
 from agents.prompt import PromptAgent
@@ -87,7 +87,7 @@ class AgentState(TypedDict):
 def coderNode(state: AgentState) -> dict:
     iteration = state["iteration"] + 1
     time.sleep(0.5)
-    print(f"\n--- Coder Iteration {iteration} ---")
+    print(f"\nCoder iteration {iteration}")
     
     coderPretext = (
         "You are an autonomous senior software engineer with workspace tools.\n\n"
@@ -107,16 +107,16 @@ def coderNode(state: AgentState) -> dict:
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
     )
     
-    coderResponse = streamInvoke(agentModel, [SystemMessage(content=coderPretext)] + state["messages"])
+    coderMessages = [SystemMessage(content=coderPretext)] + state["messages"]
+    if state.get("feedback") and state["feedback"] != "No feedback yet. This is your first attempt.":
+        coderMessages.append(HumanMessage(content=f"Please fix the following issues reported by QA:\n{state['feedback']}"))
+        
+    coderResponse = streamInvoke(agentModel, coderMessages)
     coderMessage = extractText(coderResponse.content)
     
     toolResults = executeToolCalls(coderResponse, tools)
     for tr in toolResults:
         print(f"{tr}\n")
-        
-    if toolResults:
-        print("Reindexing workspace after code modifications...\n")
-        indexWorkspace()
         
     return {
         "iteration": iteration,
@@ -126,33 +126,20 @@ def coderNode(state: AgentState) -> dict:
     }
 
 def criticNode(state: AgentState) -> dict:
-    print(f"\n--- Critic Iteration {state['iteration']} ---")
+    print(f"\nCritic iteration {state['iteration']}")
     criticPretext = (
         "You are an expert Code Critic. Verify the code changes logically and structurally.\n"
-        "You can use the readFile tool to inspect the file contents.\n"
         "If the work looks good statically, respond starting strictly with 'PASS'.\n"
         "If there are bugs, respond starting strictly with 'FAIL' followed by what needs to be fixed."
     )
     criticInstruction = (
         f"Original Instruction: {state['instruction']}\n"
         f"Coder claims to have done: {state.get('coderMessage', '')}\n"
-        f"Tool execution results: {state.get('toolResults', [])}\n"
-        "Evaluate the workspace files. Respond starting strictly with PASS or FAIL."
+        f"Tool execution results: {state.get('toolResults', [])}\n\n"
+        "Evaluate ONLY the newly generated code changes above. Respond starting strictly with PASS or FAIL."
     )
     
-    criticResponse = streamInvoke(agentModel, [SystemMessage(content=criticPretext)] + state["messages"] + [HumanMessage(content=criticInstruction)])
-    criticToolResults = executeToolCalls(criticResponse, tools)
-    for tr in criticToolResults:
-        print(f"{tr}\n")
-        
-    if criticToolResults:
-        criticResponse = streamInvoke(agentModel, [
-            SystemMessage(content=criticPretext),
-            *state["messages"],
-            criticResponse,
-            HumanMessage(content="File inspection results:\n" + "\n".join(criticToolResults) + "\n\nEvaluate the file contents above. Respond with PASS or FAIL.")
-        ])
-        
+    criticResponse = streamInvoke(agentModel, [SystemMessage(content=criticPretext), HumanMessage(content=criticInstruction)])
     criticMessage = extractText(criticResponse.content)
     
     isPass = criticMessage.strip().upper().startswith("PASS")
@@ -162,7 +149,7 @@ def criticNode(state: AgentState) -> dict:
     }
 
 def testerNode(state: AgentState) -> dict:
-    print(f"\n--- Tester Iteration {state['iteration']} ---")
+    print(f"\nTester iteration {state['iteration']}")
     
     genPretext = (
         "You are an experienced QA engineer.\n"
@@ -185,6 +172,7 @@ def testerNode(state: AgentState) -> dict:
     runPretext = (
         "You are responsible for running test suites and verifying functionality.\n"
         "- Run the appropriate tests in terminal using executeCommand (e.g. pytest, python -m unittest, npm test, or javac/java).\n"
+        "- For Node.js test files using BDD framework functions (describe/it), run them using npx jest, npx mocha, or node --test.\n"
         "- Only use build tools (like mvn or gradle) if project config files like pom.xml exist. For standalone Java files, compile and run directly using javac and java.\n"
         "- If execution fails due to missing modules or third-party dependencies, install the required library using executeCommand and re-run the tests.\n"
         "- When all tests pass cleanly without errors, respond starting strictly with 'PASS'.\n"
@@ -203,14 +191,17 @@ def testerNode(state: AgentState) -> dict:
     
     for attempt in range(1, 4):
         if attempt > 1:
-            print(f"\n--- Tester Retry {attempt}/3 ---")
+            print(f"\nTester retry {attempt}/3")
         testerResponse = streamInvoke(agentModel, runMessages)
-        runTools = executeToolCalls(testerResponse, tools)
-        for tr in runTools:
-            print(tr,"\n")
-            
         testerMessage = extractText(testerResponse.content)
         
+        if testerMessage.strip().upper().startswith("PASS") or testerMessage.strip().upper().startswith("FAIL"):
+            break
+            
+        runTools = executeToolCalls(testerResponse, tools)
+        for tr in runTools:
+            print(tr, "\n")
+            
         if not runTools:
             break
             
@@ -218,10 +209,6 @@ def testerNode(state: AgentState) -> dict:
             testerResponse,
             HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate the output. If missing imports caused errors, install them and re-test. If tests passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
         ])
-        
-        if attempt == 3 and runTools:
-            testerResponse =streamInvoke(agentModel, runMessages)
-            testerMessage = extractText(testerResponse.content)
             
     isPass = testerMessage.strip().upper().startswith("PASS")
     if isPass:
@@ -257,6 +244,8 @@ builder.add_conditional_edges("tester", routeTester, {"coder": "coder", END: END
 workflow = builder.compile()
 
 def runAgent(instruction, taskContext=""):
+    print("Indexing workspace...")
+    indexWorkspace()
     context = getContext(instruction)
     initialState = {
         "messages": [HumanMessage(content=instruction)],

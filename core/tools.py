@@ -62,6 +62,11 @@ def readFile(path: str) -> str:
 @tool
 def executeCommand(command: str) -> str:
     """Executes a CLI command in the terminal inside the work directory and returns the output."""
+    print(f"\n[Command Approval] {command}")
+    confirm = input("Execute command? (y/n): ").strip().lower()
+    if confirm != 'y':
+        return "Command execution rejected by user."
+
     try:
         WORK_DIR.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
