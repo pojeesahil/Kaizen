@@ -16,23 +16,19 @@ class GraphifyVectorRAG(RAGInterface):
     def index_codebase(self, path):
         self.indexed_path = os.path.abspath(path)
 
-        print("running graphify on workspace...")
-        
+        print("\nRunning graphify on workspace...")
 
-        graphify_cmd = shutil.which("graphify")
-        if graphify_cmd:
-            cmd = [graphify_cmd, path]
-        else:
-            cmd = [sys.executable, "-m", "graphify", path]
+        abs_path = os.path.abspath(path)
+        cmd = [sys.executable, "-m", "graphify", abs_path, "--code-only"]
 
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, shell=(os.name == "nt"))
             if res.returncode == 0:
-                print("  graphify completed successfully")
+                print("  graphify completed successfully\n")
             else:
-                print(f"  graphify note/output: {res.stdout[:200] if res.stdout else res.stderr[:200]}")
+                print(f"  graphify note/output: {res.stdout[:200] if res.stdout else res.stderr[:200]}\n")
         except Exception as e:
-            print(f"  graphify execution error: {e}")
+            print(f"  graphify execution error: {e}\n")
 
         work_gpath = os.path.join(path, "graphify-out")
         root_gpath = "graphify-out"
@@ -41,19 +37,23 @@ class GraphifyVectorRAG(RAGInterface):
                 shutil.rmtree(root_gpath, ignore_errors=True)
             shutil.move(work_gpath, root_gpath)
 
-        print("indexing into vector db...")
+        print("Indexing into vector DB...")
         self.vector_store.clear()
         docs, metas, ids = read_and_chunk_codebase(path)
         if docs:
             self.vector_store.add_documents(docs, metas, ids)
-        print(f"  {self.vector_store.count()} chunks stored")
+        print(f"  {self.vector_store.count()} chunks stored\n")
 
-        gpath = os.path.join(root_gpath, "graph.json")
-        if os.path.exists(gpath):
-            print(f"loading knowledge graph from {gpath}...")
-            self.graph.load_graph(gpath)
+        gpath_root = os.path.join(root_gpath, "graph.json")
+        gpath_work = os.path.join(work_gpath, "graph.json")
+        target_gpath = gpath_root if os.path.exists(gpath_root) else (gpath_work if os.path.exists(gpath_work) else None)
+
+        if target_gpath:
+            print(f"Loading knowledge graph from {target_gpath}...")
+            self.graph.load_graph(target_gpath)
+            print()
         else:
-            print("no graph found (run graphify to enable graph features)")
+            print("No graph found (run graphify to enable graph features)\n")
 
     def retrieve(self, query, top_k=5):
         results = []
