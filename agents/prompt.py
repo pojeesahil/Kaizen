@@ -96,7 +96,7 @@ def scoreDomains(prompt: str) -> Dict[str, int]:
     text = normalize(prompt)
     scores = {d: sum(kw in text for kw in kws) for d, kws in domainKeywords.items()}
     scores = {d: s for d, s in scores.items() if s}
-    return dict(sorted(scores.items(), key = lambda kv: kv[1], reverse=True))
+    return dict(sorted(scores.items(), key = lambda kv: kv[1], reverse = True))
 
 
 def inferArchitecture(prompt: str, domains: List[str]) -> List[str]:
@@ -134,7 +134,7 @@ def complexityEstimate(prompt: str, deliverables: List[Dict]) -> str:
     return "small"
 
 
-def stackRecoms(domains: List[str]) -> Dict[str, str]:
+def getStackRecoms(domains: List[str]) -> Dict[str, str]:
     stack: Dict[str, str] = {}
     for domain in domains:
         stack.update(stackRecoms.get(domain, {}))
@@ -190,40 +190,49 @@ def enhancedRequest(prompt, domains, architecture, deliverables, stack, requirem
 
 
 class PromptAgent:
-    def process(self, user_prompt: str) -> Dict:
-        domains = list(scoreDomains(user_prompt).keys())
-        architecture = inferArchitecture(user_prompt, domains)
-        deliverables = detectDeliverables(user_prompt)
-        complexity = complexityEstimate(user_prompt, deliverables)
-        stack = stackRecoms(domains)
-        requirements = discoverRequirements(user_prompt, domains)
-        clarification_questions = genQuestions(requirements["essential"])
-        constraints = detectConstraints(user_prompt)
-        success_criteria = successCriteria(deliverables)
-        enhanced_request = enhancedRequest(user_prompt, domains, architecture, deliverables, stack, requirements, constraints)
+    def process(self, userPrompt: str) -> Dict:
+        domains = list(scoreDomains(userPrompt).keys())
+        architecture = inferArchitecture(userPrompt, domains)
+        deliverables = detectDeliverables(userPrompt)
+        complexity = complexityEstimate(userPrompt, deliverables)
+        stack = getStackRecoms(domains)
+        requirements = discoverRequirements(userPrompt, domains)
+        clarificationQuestions = genQuestions(requirements["essential"])
+        constraints = detectConstraints(userPrompt)
+        successCriteriaResult = successCriteria(deliverables)
+        enhancedRequestText = enhancedRequest(userPrompt, domains, architecture, deliverables, stack, requirements, constraints)
 
-        if clarification_questions:
-            planner_notes = (f"{len(deliverables)} independent deliverable(s) detected; create one root task per deliverable in the DAG. "
-                              f"{len(clarification_questions)} essential gap(s) require user input before planning can proceed with full confidence.")
+        if clarificationQuestions:
+            plannerNotes = (f"{len(deliverables)} independent deliverable(s) detected; create one root task per deliverable in the DAG. "
+                             f"{len(clarificationQuestions)} essential gap(s) require user input before planning can proceed with full confidence.")
         else:
-            planner_notes = f"{len(deliverables)} independent deliverable(s) detected; no essential gaps found, planning can proceed with the assumed defaults above."
+            plannerNotes = f"{len(deliverables)} independent deliverable(s) detected; no essential gaps found, planning can proceed with the assumed defaults above."
 
         return {
             "intent": self.summary(deliverables),
             "project_type": domains[0] if domains else "unclassified",
+            "projectType": domains[0] if domains else "unclassified",
             "complexity": complexity,
             "architecture": architecture,
             "domain": domains,
             "deliverables": deliverables,
             "recommended_stack": stack,
+            "recommendedStack": stack,
             "requirements": requirements,
             "missing_information": requirements["essential"],
-            "clarification_questions": clarification_questions,
+            "missingInformation": requirements["essential"],
+            "clarification_questions": clarificationQuestions,
+            "clarificationQuestions": clarificationQuestions,
             "constraints": constraints,
-            "success_criteria": success_criteria,
-            "enhanced_request": enhanced_request,
-            "planner_notes": planner_notes,
+            "success_criteria": successCriteriaResult,
+            "successCriteria": successCriteriaResult,
+            "enhanced_request": enhancedRequestText,
+            "enhancedRequest": enhancedRequestText,
+            "planner_notes": plannerNotes,
+            "plannerNotes": plannerNotes,
         }
+
+    run = process
 
     @staticmethod
     def summary(deliverables: List[Dict]) -> str:
@@ -236,3 +245,4 @@ if __name__ == "__main__":
     agent = PromptAgent()
     example = "Create a README, Dockerfile, and a login page with authentication, offline only"
     print(json.dumps(agent.process(example), indent = 2))
+
