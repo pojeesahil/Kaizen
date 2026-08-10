@@ -17,8 +17,8 @@ class DependencyResolver:
 
     def resolve(self, Deliverables: List[Deliverable]) -> List[Deliverable]:
         ByKind: Dict[str, List[Deliverable]] = {}
-        for Deliverable in Deliverables:
-            ByKind.setdefault(Deliverable.kind, []).append(Deliverable)
+        for deliverable in Deliverables:
+            ByKind.setdefault(deliverable.kind, []).append(deliverable)
 
         for deliverable in Deliverables:
             NeededKinds = KindDependencies.get(deliverable.kind, [])

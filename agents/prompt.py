@@ -85,7 +85,7 @@ clarificationTemps = {
     "target_environment": "What is the target deployment environment (cloud, on-prem, local)?"
 }
 
-splitPattern = re.compile(r",| and | & | as well as |;", flags = re.IGNORECASE)
+splitPattern = re.compile(r",| and | & | as well as | also |;", flags = re.IGNORECASE)
 
 
 def normalize(prompt: str) -> str:
