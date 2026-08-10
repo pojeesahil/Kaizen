@@ -1,10 +1,14 @@
 import os
-from rag.interface import RAGInterface
-from rag.vector_store import VectorStore, read_and_chunk_codebase
-from rag.graph_rag import GraphRAG
 import shutil
 import subprocess
 import sys
+from rag.interface import RAGInterface
+from rag.vector_store import VectorStore, read_and_chunk_codebase
+from rag.graph_rag import GraphRAG
+from rag.reranker import SimpleLLMReranker, BaseRAGRetriever
+from langchain_classic.retrievers import ContextualCompressionRetriever
+from core.config import llm
+
 
 class GraphifyVectorRAG(RAGInterface):
 
@@ -55,7 +59,8 @@ class GraphifyVectorRAG(RAGInterface):
         else:
             print("No graph found (run graphify to enable graph features)\n")
 
-    def retrieve(self, query, top_k=5):
+    def retrieve_candidates(self, query, top_k=15):
+        """Retrieve a wider set of initial candidates for reranking."""
         results = []
         seen = set()
 
@@ -79,6 +84,38 @@ class GraphifyVectorRAG(RAGInterface):
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
 
+    def retrieve(self, query, top_k=5):
+        """Retrieve and rerank candidates using LangChain ContextualCompressionRetriever."""
+        # 1. Setup our base retriever wrapper
+        base_retriever = BaseRAGRetriever(rag_instance=self)
+
+        # 2. Setup the LLM reranker/compressor
+        compressor = SimpleLLMReranker(llm=llm, top_n=top_k)
+
+        # 3. Create the ContextualCompressionRetriever
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor,
+            base_retriever=base_retriever
+        )
+
+        # 4. Invoke the retrieval and compression pipeline
+        try:
+            print(f"[Reranker] Retrieving and reranking top {top_k} results using LangChain...")
+            compressed_docs = compression_retriever.invoke(query)
+            
+            # Format documents back to original dictionary format
+            results = []
+            for doc in compressed_docs:
+                results.append({
+                    "content": doc.page_content,
+                    "file_path": doc.metadata.get("file_path", "unknown"),
+                    "score": doc.metadata.get("score", 1.0)
+                })
+            return results
+        except Exception as e:
+            print(f"[Reranker] ContextualCompressionRetriever failed: {e}. Falling back to default retrieval.")
+            return self.retrieve_candidates(query, top_k=top_k)
+
     def get_context_for_agent(self, query, top_k=5):
         results = self.retrieve(query, top_k)
         if not results:
@@ -94,3 +131,4 @@ if __name__ == "__main__":
     rag = GraphifyVectorRAG()
     rag.index_codebase(".")
     print(rag.get_context_for_agent("retrieve search", top_k=2))
+
