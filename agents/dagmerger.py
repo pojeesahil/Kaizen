@@ -1,9 +1,10 @@
 from typing import List, Dict
-from models import Deliverable, DeliverablePlan, TaskNode, DAGPlan
+from agents.models import Deliverable, DeliverablePlan, TaskNode, DAGPlan
 
 
 class DAGMerger:
-    def merge(self, Plans: List[DeliverablePlan], Deliverables: List[Deliverable]) -> DAGPlan:
+    def merge(self, Plans: List[DeliverablePlan], Deliverables: List[Deliverable] = None) -> DAGPlan:
+        Deliverables = Deliverables or [p.deliverable for p in Plans]
         AllTasks: List[TaskNode] = []
         FirstTaskByDeliverable: Dict[str, str] = {}
         LastTaskByDeliverable: Dict[str, str] = {}

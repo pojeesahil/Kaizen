@@ -18,6 +18,12 @@ def newId(Prefix: str) -> str:
 
 
 @dataclass
+class TaskResult:
+    task_id: str
+    success: bool
+    message: str = ""
+
+@dataclass
 class TaskNode:
 
     id: str

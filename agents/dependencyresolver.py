@@ -1,9 +1,9 @@
 from typing import List, Dict
-from models import Deliverable
+from agents.models import Deliverable
 
 KindDependencies: Dict[str, List[str]] = {
-    "frontend": ["backend", "database_schema"],
-    "ui_page": ["backend"],
+    "frontend": [],
+    "ui_page": [],
     "tests": ["backend", "frontend", "ui_page"],
     "documentation": ["backend", "frontend", "ui_page", "database_schema", "deployment_script", "ci_cd_workflow", "tests", "config"],
     "ci_cd_workflow": ["tests"],

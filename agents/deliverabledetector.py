@@ -1,6 +1,6 @@
 import re
 from typing import List, Dict, Any
-from models import Deliverable, newId
+from agents.models import Deliverable, newId
 
 ExtensionKind = {
     ".html": "ui_page",
@@ -52,14 +52,15 @@ def _looksLikeFilename(Name: str) -> bool:
     return bool(re.match(r"^[\w\-]+\.[A-Za-z0-9]+$", Name.strip()))
 
 
-def _dedupe(Items: List[str]) -> List[str]:
+def _dedupe(Items: List[Any]) -> List[str]:
     Seen = set()
     Result = []
     for Item in Items:
-        Key = Item.strip().lower()
+        Name = Item.get("name", str(Item)) if isinstance(Item, dict) else str(Item)
+        Key = Name.strip().lower()
         if Key and Key not in Seen:
             Seen.add(Key)
-            Result.append(Item.strip())
+            Result.append(Name.strip())
     return Result
 
 

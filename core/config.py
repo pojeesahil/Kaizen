@@ -3,6 +3,7 @@ import logging
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
+os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 load_dotenv("secure.env")
@@ -21,7 +22,7 @@ def get_llm(provider=None, model_name=None, temperature=0):
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
     else:
-        return ChatOllama(model=model_name, temperature=temperature)
+        return ChatOllama(model=model_name, temperature=temperature, num_thread=4)
 
 embeddings = OllamaEmbeddings(model="qwen2.5-coder:7b")
 llm = get_llm()

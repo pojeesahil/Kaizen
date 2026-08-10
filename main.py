@@ -1,3 +1,6 @@
+import os
+os.environ["OLLAMA_NUM_PARALLEL"] = "4"
+
 import time
 import json
 import asyncio
@@ -6,10 +9,12 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.config import llm, get_llm
-from core.tools import tools
+from core.tools import tools, createFile, editFile, deleteResource, readFile
 from rag.rag import indexWorkspace, getContext
 from agents.prompt import PromptAgent
-from agents.planner import Planner
+from agents.planneragent import PlannerAgent
+from agents.dag import DAG
+from agents.scheduler import Scheduler
 
 def extractText(content) -> str:
     if isinstance(content, str):
@@ -26,6 +31,22 @@ def extractText(content) -> str:
         return "\n".join(parts)
     return str(content)
 
+def sanitizeCommand(cmd: str) -> str:
+    if "pip install" in cmd:
+        stdLibs = {"unittest", "sys", "os", "json", "math", "re", "asyncio", "sqlite3", "time", "typing", "collections"}
+        parts = cmd.split("&&")
+        cleanedParts = []
+        for part in parts:
+            if "pip install" in part:
+                tokens = part.split()
+                filtered = [tok for tok in tokens if tok.lower() not in stdLibs]
+                if len(filtered) > 2:
+                    cleanedParts.append(" ".join(filtered))
+            else:
+                cleanedParts.append(part)
+        return " && ".join(cleanedParts) if cleanedParts else "echo Standard library module available by default"
+    return cmd
+
 def executeToolCalls(response, tools_list):
     toolMap = {t.name: t for t in tools_list}
     executed = []
@@ -35,6 +56,8 @@ def executeToolCalls(response, tools_list):
             targs = tc.get("args", {})
             if tname in toolMap:
                 try:
+                    if tname == "executeCommand" and "command" in targs:
+                        targs["command"] = sanitizeCommand(targs["command"])
                     res = toolMap[tname].invoke(targs)
                     executed.append(f"Tool {tname} executed: {res}")
                 except Exception as err:
@@ -53,6 +76,8 @@ def executeToolCalls(response, tools_list):
                 targs = data.get("arguments") or data.get("args") or {}
                 if tname in toolMap:
                     try:
+                        if tname == "executeCommand" and "command" in targs:
+                            targs["command"] = sanitizeCommand(targs["command"])
                         res = toolMap[tname].invoke(targs)
                         executed.append(f"Tool {tname} executed: {res}")
                     except Exception as err:
@@ -62,6 +87,8 @@ def executeToolCalls(response, tools_list):
                 idx = start + 1
     return executed
 
+coderTools = [createFile, editFile, deleteResource, readFile]
+coderModel = llm.bind_tools(coderTools)
 agentModel = llm.bind_tools(tools)
 
 def streamInvoke(model, messages):
@@ -101,7 +128,9 @@ def coderNode(state: AgentState) -> dict:
         "Code Guidelines:\n"
         "- Write clean, idiomatic, production-grade code without generic templates or redundant comments.\n"
         "- Use natural, domain-specific variable and function names.\n"
-        "- Maintain clean modular structure and standard formatting.\n\n"
+        "- Maintain clean modular structure and standard formatting.\n"
+        "- Focus strictly on writing application/source code files (e.g. main.py, app.js). Do NOT create or edit test files (e.g. test_*.py, *.test.js); unit tests are managed strictly by the Tester Agent.\n"
+        "- Do NOT attempt to readFile non-existent files like requirements.txt. Create new implementation files directly using createFile.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
         f"Prerequisite Tasks Context:\n{state['taskContext'] if state['taskContext'] else 'None'}\n\n"
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
@@ -111,10 +140,11 @@ def coderNode(state: AgentState) -> dict:
     if state.get("feedback") and state["feedback"] != "No feedback yet. This is your first attempt.":
         coderMessages.append(HumanMessage(content=f"Please fix the following issues reported by QA:\n{state['feedback']}"))
         
-    coderResponse = streamInvoke(agentModel, coderMessages)
+    threadModel = get_llm().bind_tools(coderTools)
+    coderResponse = streamInvoke(threadModel, coderMessages)
     coderMessage = extractText(coderResponse.content)
     
-    toolResults = executeToolCalls(coderResponse, tools)
+    toolResults = executeToolCalls(coderResponse, coderTools)
     for tr in toolResults:
         print(f"{tr}\n")
         
@@ -243,6 +273,95 @@ builder.add_conditional_edges("tester", routeTester, {"coder": "coder", END: END
 
 workflow = builder.compile()
 
+def runCoder(instruction, taskContext=""):
+    context = getContext(instruction)
+    initialState = {
+        "messages": [HumanMessage(content=instruction)],
+        "instruction": instruction,
+        "taskContext": taskContext,
+        "context": context,
+        "coderMessage": "",
+        "toolResults": [],
+        "feedback": "No feedback yet. This is your first attempt.",
+        "iteration": 0,
+        "success": False
+    }
+    return coderNode(initialState)
+
+def runBatchEval(batchTasks, coderResults):
+    taskNames = ", ".join([getattr(t, "name", getattr(t, "objective", t.id)) for t in batchTasks])
+    print(f"\n[Batch Verification] Verifying {len(batchTasks)} completed coder task(s): {taskNames}")
+    
+    summaryText = "\n".join([f"- Task '{getattr(t, 'name', t.id)}': {res.get('coderMessage', '')}" for t, res in zip(batchTasks, coderResults)])
+    combinedTools = sum([res.get("toolResults", []) for res in coderResults], [])
+    
+    print("\n--- Single Critic Agent Verification ---")
+    criticPretext = (
+        "You are an expert Code Critic. Verify all code changes made across the batch tasks.\n"
+        "If all work looks good statically, respond starting strictly with 'PASS'.\n"
+        "If there are bugs, respond starting strictly with 'FAIL' followed by what needs to be fixed."
+    )
+    criticInstruction = (
+        f"Tasks Evaluated: {taskNames}\n"
+        f"Coder Summaries:\n{summaryText}\n"
+        f"Files Created/Edited: {combinedTools}\n\n"
+        "Evaluate ALL newly generated code changes above. Respond starting strictly with PASS or FAIL."
+    )
+    
+    criticRes = streamInvoke(llm, [SystemMessage(content=criticPretext), HumanMessage(content=criticInstruction)])
+    criticMessage = extractText(criticRes.content)
+    
+    if not criticMessage.strip().upper().startswith("PASS"):
+        return False, f"Critic Feedback:\n{criticMessage}"
+        
+    print("\n--- Single Tester Agent Verification ---")
+    testerPretext = (
+        "You are an experienced QA Automation Engineer.\n"
+        "- If automated unit tests do not exist or need updating for the new code, generate or modify test files using createFile or editFile.\n"
+        "- Run the appropriate tests in terminal using executeCommand (e.g. pytest, python -m unittest, npm test, or javac/java).\n"
+        "- If missing modules or third-party dependencies cause errors, install them using executeCommand and re-run tests.\n"
+        "- When all tests pass cleanly, respond starting strictly with 'PASS'.\n"
+        "- If assertions or code bugs persist, respond starting strictly with 'FAIL' followed by details."
+    )
+    testerInstruction = (
+        f"Tasks Evaluated: {taskNames}\n"
+        f"Batch Coder Changes:\n{summaryText}\n\n"
+        "Generate/update required unit tests, run test suite, and verify functionality for all batch tasks."
+    )
+    
+    testMsgs = [
+        SystemMessage(content=testerPretext),
+        HumanMessage(content=testerInstruction)
+    ]
+    
+    testerMessage = ""
+    for attempt in range(1, 4):
+        if attempt > 1:
+            print(f"\n[Batch Verification] Tester retry {attempt}/3")
+        testerRes = streamInvoke(agentModel, testMsgs)
+        testerMessage = extractText(testerRes.content)
+        
+        runTools = executeToolCalls(testerRes, tools)
+        for tr in runTools:
+            print(tr, "\n")
+            
+        if testerMessage.strip().upper().startswith("PASS"):
+            break
+        if not runTools:
+            break
+            
+        testMsgs.extend([
+            testerRes,
+            HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate output. If missing imports caused errors, install them and re-test. If tests passed cleanly, respond strictly with PASS. Otherwise FAIL.")
+        ])
+        
+    isPass = testerMessage.strip().upper().startswith("PASS")
+    if isPass:
+        print("\nBatch Verification finished successfully.\n")
+        return True, "Batch verified successfully."
+        
+    return False, f"Tester Execution Failed:\n{testerMessage}"
+
 def runAgent(instruction, taskContext=""):
     print("Indexing workspace...")
     indexWorkspace()
@@ -275,8 +394,26 @@ if __name__ == "__main__":
             print("Reindexed the workspace")
         elif q:
             promptAgent = PromptAgent()
-            enhancedPrompt = promptAgent.run(query)
-            enhancedRequest = enhancedPrompt.get("enhanced_request", query)
+            promptOutput = promptAgent.process(query)
             
-            planner = Planner()
-            asyncio.run(planner.run(enhancedRequest))
+            plannerAgent = PlannerAgent()
+            dagPlan = plannerAgent.plan(promptOutput)
+            
+            dag = DAG()
+            for t in dagPlan.taskNodes:
+                t.name = getattr(t, "objective", t.id)
+                t.agent = "Coding"
+                dag.add_task(t)
+            dag.build()
+            
+            print("\nGenerated Tasks:")
+            for task in dagPlan.taskNodes:
+                deps = ", ".join(task.dependencies) if task.dependencies else "none"
+                print(f" - [{task.priority}] {task.objective} (deps: {deps})")
+                
+            print("\nExecution Order:")
+            print(dag.topological_sort())
+            
+            indexWorkspace()
+            scheduler = Scheduler(dag, query)
+            asyncio.run(scheduler.run())

@@ -1,9 +1,9 @@
 from typing import Iterator, Dict, Any, List
-from models import PlanningEvent, Deliverable, DeliverablePlan
-from deliverabledetector import DeliverableDetector
-from dependencyresolver import DependencyResolver
-from deliverableplanner import DeliverablePlanner
-from dagmerger import DAGMerger
+from agents.models import PlanningEvent, Deliverable, DeliverablePlan
+from agents.deliverabledetector import DeliverableDetector
+from agents.dependencyresolver import DependencyResolver
+from agents.deliverableplanner import DeliverablePlanner
+from agents.dagmerger import DAGMerger
 
 ThinkingSummaries = {
     "ui_page": "Designing layout and structure...",

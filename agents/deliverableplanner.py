@@ -1,17 +1,17 @@
 from typing import List, Optional
-from models import Deliverable, TaskNode, DeliverablePlan, newId
+from agents.models import Deliverable, TaskNode, DeliverablePlan, newId
 
 StepTemplates = {
-    "ui_page": ["Analyse requirements", "Design layout", "Implement HTML/CSS", "Validate against requirements"],
-    "frontend": ["Analyse requirements", "Design component structure", "Implement components", "Wire up API calls", "Validate UI behaviour"],
-    "backend": ["Analyse requirements", "Design API surface", "Implement endpoints", "Implement business logic", "Validate against requirements"],
-    "database_schema": ["Analyse data requirements", "Design schema", "Implement migrations", "Validate schema"],
-    "documentation": ["Gather project details", "Draft documentation", "Review for accuracy"],
-    "deployment_script": ["Analyse runtime requirements", "Draft configuration", "Validate build"],
-    "ci_cd_workflow": ["Analyse pipeline requirements", "Draft workflow", "Validate workflow"],
-    "tests": ["Identify test scope", "Write test cases", "Validate coverage"],
-    "config": ["Identify required settings", "Draft configuration file", "Validate configuration"],
-    "generic": ["Analyse requirements", "Design implementation", "Implement", "Validate"]
+    "ui_page": ["Implement UI Page"],
+    "frontend": ["Implement Frontend Components"],
+    "backend": ["Implement Backend API"],
+    "database_schema": ["Implement Database Schema"],
+    "documentation": ["Draft Documentation"],
+    "deployment_script": ["Draft Deployment Configuration"],
+    "ci_cd_workflow": ["Draft CI/CD Workflow"],
+    "tests": ["Write Unit Tests"],
+    "config": ["Draft Configuration File"],
+    "generic": ["Implement Deliverable"]
 }
 
 KindPriority = {
@@ -36,6 +36,8 @@ class DeliverablePlanner:
         Priority = KindPriority.get(Deliverable.kind, 3)
         Tasks = self._buildTaskChain(Deliverable, Steps, Priority)
         return DeliverablePlan(deliverable=Deliverable, tasks=Tasks)
+
+    plan_deliverable = plan
 
     def _generateAtomicSteps(self, Deliverable: Deliverable) -> List[str]:
         return StepTemplates.get(Deliverable.kind, StepTemplates["generic"])
