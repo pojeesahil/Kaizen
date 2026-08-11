@@ -2,7 +2,7 @@ import asyncio
 import heapq
 
 from agents.dag import DAG
-from agents.models import TaskNode, TaskResult
+from agents.models import TaskNode
 
 
 class Scheduler:
@@ -43,7 +43,7 @@ class Scheduler:
                 _, task_id = heapq.heappop(self.queue)
                 batch.append(self.dag.tasks[task_id])
 
-            print(f"\n--- Running {len(batch)} Coder Agent(s) in Parallel ---")
+            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel")
             coderResults = await asyncio.gather(
                 *(asyncio.to_thread(self.executeCoder, task) for task in batch)
             )
