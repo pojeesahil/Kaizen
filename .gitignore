@@ -4,6 +4,7 @@ __pycache_
 __pycache__
 graphify-out/
 chroma_db/
+chroma.sqlite3
 work/
 chroma_db/chroma.sqlite3
 network.html

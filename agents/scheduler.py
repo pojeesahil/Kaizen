@@ -12,6 +12,7 @@ class Scheduler:
         self.goal = goal
         self.queue: list[tuple[int, str]] = []
         self.taskOutputs: dict[str, str] = {}
+        self.taskFeedbacks: dict[str, str] = {}
 
     def load_ready_tasks(self) -> None:
         for task in self.dag.get_ready_tasks():
@@ -31,7 +32,8 @@ class Scheduler:
                 dependencyContext += f"\n- Parent task '{depId}' output: {self.taskOutputs[depId]}"
 
         instruction = f"Overall Goal: {self.goal}\nTask: {tname}" if self.goal else tname
-        return runCoder(instruction, taskContext=dependencyContext)
+        feedback = self.taskFeedbacks.get(task.id, "")
+        return runCoder(instruction, taskContext=dependencyContext, feedback=feedback)
 
     async def run(self) -> None:
         self.load_ready_tasks()
@@ -55,10 +57,12 @@ class Scheduler:
                 for task, res in zip(batch, coderResults):
                     self.dag.mark_complete(task.id)
                     self.taskOutputs[task.id] = res.get("coderMessage", "Task completed.")
+                    self.taskFeedbacks.pop(task.id, None)
             else:
                 for task in batch:
                     tname = getattr(task, "name", getattr(task, "objective", task.id))
                     print(f"[FAILED] {tname}")
                     task.status = "pending"
+                    self.taskFeedbacks[task.id] = feedback
 
             self.load_ready_tasks()
