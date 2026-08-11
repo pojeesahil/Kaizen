@@ -32,6 +32,9 @@ def extractText(content) -> str:
     return str(content)
 
 def sanitizeCommand(cmd: str) -> str:
+    if cmd.strip().startswith("pytest ") or "&& pytest " in cmd or "; pytest " in cmd:
+        cmd = re.sub(r'(^|\b&&?\s*)pytest\b', r'\1python -m pytest', cmd)
+
     if "pip install" in cmd:
         stdLibs = {"unittest", "sys", "os", "json", "math", "re", "asyncio", "sqlite3", "time", "typing", "collections"}
         parts = cmd.split("&&")
@@ -130,7 +133,10 @@ def coderNode(state: AgentState) -> dict:
         "- Use natural, domain-specific variable and function names.\n"
         "- Maintain clean modular structure and standard formatting.\n"
         "- Focus strictly on writing application/source code files (e.g. main.py, app.js). Do NOT create or edit test files (e.g. test_*.py, *.test.js); unit tests are managed strictly by the Tester Agent.\n"
-        "- Do NOT attempt to readFile non-existent files like requirements.txt. Create new implementation files directly using createFile.\n\n"
+        "- Do NOT attempt to readFile non-existent files like requirements.txt. Create new implementation files directly using createFile.\n"
+        "- Check Workspace Context first. If application code files ALREADY exist in workspace, do NOT overwrite or recreate them from scratch using createFile. Use editFile to apply specific modifications to fix feedback reported by QA.\n"
+        "- For frontend tasks: use JavaScript fetch() or XMLHttpRequest to call backend API endpoints. Do NOT use <script src='/api/...'> tags. Display fetched data dynamically in the DOM.\n"
+        "- For backend tasks: enable CORS (Access-Control-Allow-Origin header or flask-cors) so the frontend can call API endpoints.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
         f"Prerequisite Tasks Context:\n{state['taskContext'] if state['taskContext'] else 'None'}\n\n"
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
@@ -201,10 +207,11 @@ def testerNode(state: AgentState) -> dict:
         
     runPretext = (
         "You are responsible for running test suites and verifying functionality.\n"
-        "- Run the appropriate tests in terminal using executeCommand (e.g. pytest, python -m unittest, npm test, or javac/java).\n"
+        "CRITICAL: You MUST output executeCommand tool calls to run tests. Do NOT just describe what to run as plain text.\n"
+        "- Install any missing dependencies first using executeCommand (e.g. pip install flask).\n"
+        "- Then run the test suite using executeCommand (e.g. python -m pytest, python -m unittest, npm test).\n"
         "- For Node.js test files using BDD framework functions (describe/it), run them using npx jest, npx mocha, or node --test.\n"
         "- Only use build tools (like mvn or gradle) if project config files like pom.xml exist. For standalone Java files, compile and run directly using javac and java.\n"
-        "- If execution fails due to missing modules or third-party dependencies, install the required library using executeCommand and re-run the tests.\n"
         "- When all tests pass cleanly without errors, respond starting strictly with 'PASS'.\n"
         "- If functional assertions or code bugs persist, respond starting strictly with 'FAIL' followed by what failed."
     )
@@ -224,16 +231,23 @@ def testerNode(state: AgentState) -> dict:
             print(f"\nTester retry {attempt}/3")
         testerResponse = streamInvoke(agentModel, runMessages)
         testerMessage = extractText(testerResponse.content)
-        
-        if testerMessage.strip().upper().startswith("PASS") or testerMessage.strip().upper().startswith("FAIL"):
-            break
-            
         runTools = executeToolCalls(testerResponse, tools)
         for tr in runTools:
             print(tr, "\n")
             
-        if not runTools:
+        if testerMessage.strip().upper().startswith("PASS"):
             break
+        testOutput = "\n".join(runTools)
+        if runTools and "Exit Code: 0" in testOutput and any(s in testOutput for s in ["OK", " passed", "PASSED"]):
+            testerMessage = "PASS"
+            print("\n[Auto-detected] Tests passed from command output.")
+            break
+        if not runTools:
+            runMessages.extend([
+                testerResponse,
+                HumanMessage(content="You did NOT use any tool calls. You MUST use executeCommand to install dependencies and run tests. Output tool calls, not plain text instructions.")
+            ])
+            continue
             
         runMessages.extend([
             testerResponse,
@@ -253,27 +267,23 @@ def testerNode(state: AgentState) -> dict:
 def routeCritic(state: AgentState) -> str:
     lastMessage = extractText(state["messages"][-1].content)
     if not lastMessage.strip().upper().startswith("PASS"):
-        return "coder" if state["iteration"] < 4 else END
+        return END
     return "tester"
 
 def routeTester(state: AgentState) -> str:
-    if state["success"] or state["iteration"] >= 4:
-        return END
-    return "coder"
+    return END
 
-builder = StateGraph(AgentState)
-builder.add_node("coder", coderNode)
-builder.add_node("critic", criticNode)
-builder.add_node("tester", testerNode)
+evalBuilder = StateGraph(AgentState)
+evalBuilder.add_node("critic", criticNode)
+evalBuilder.add_node("tester", testerNode)
 
-builder.add_edge(START, "coder")
-builder.add_edge("coder", "critic")
-builder.add_conditional_edges("critic", routeCritic, {"tester": "tester", "coder": "coder", END: END})
-builder.add_conditional_edges("tester", routeTester, {"coder": "coder", END: END})
+evalBuilder.add_edge(START, "critic")
+evalBuilder.add_conditional_edges("critic", routeCritic, {"tester": "tester", END: END})
+evalBuilder.add_conditional_edges("tester", routeTester, {END: END})
 
-workflow = builder.compile()
+evalWorkflow = evalBuilder.compile()
 
-def runCoder(instruction, taskContext=""):
+def runCoder(instruction, taskContext="", feedback=""):
     context = getContext(instruction)
     initialState = {
         "messages": [HumanMessage(content=instruction)],
@@ -282,7 +292,7 @@ def runCoder(instruction, taskContext=""):
         "context": context,
         "coderMessage": "",
         "toolResults": [],
-        "feedback": "No feedback yet. This is your first attempt.",
+        "feedback": feedback if feedback else "No feedback yet. This is your first attempt.",
         "iteration": 0,
         "success": False
     }
@@ -291,76 +301,25 @@ def runCoder(instruction, taskContext=""):
 def runBatchEval(batchTasks, coderResults):
     taskNames = ", ".join([getattr(t, "name", getattr(t, "objective", t.id)) for t in batchTasks])
     print(f"\n[Batch Verification] Verifying {len(batchTasks)} completed coder task(s): {taskNames}")
-    
     summaryText = "\n".join([f"- Task '{getattr(t, 'name', t.id)}': {res.get('coderMessage', '')}" for t, res in zip(batchTasks, coderResults)])
     combinedTools = sum([res.get("toolResults", []) for res in coderResults], [])
     
-    print("\n--- Single Critic Agent Verification ---")
-    criticPretext = (
-        "You are an expert Code Critic. Verify all code changes made across the batch tasks.\n"
-        "If all work looks good statically, respond starting strictly with 'PASS'.\n"
-        "If there are bugs, respond starting strictly with 'FAIL' followed by what needs to be fixed."
-    )
-    criticInstruction = (
-        f"Tasks Evaluated: {taskNames}\n"
-        f"Coder Summaries:\n{summaryText}\n"
-        f"Files Created/Edited: {combinedTools}\n\n"
-        "Evaluate ALL newly generated code changes above. Respond starting strictly with PASS or FAIL."
-    )
+    initialState = {
+        "messages": [HumanMessage(content=f"Verify batch tasks: {taskNames}\nCoder Summaries:\n{summaryText}")],
+        "instruction": f"Batch Verification: {taskNames}",
+        "taskContext": summaryText,
+        "context": f"Files Created/Edited: {combinedTools}",
+        "coderMessage": summaryText,
+        "toolResults": combinedTools,
+        "feedback": "",
+        "iteration": 0,
+        "success": False
+    }
     
-    criticRes = streamInvoke(llm, [SystemMessage(content=criticPretext), HumanMessage(content=criticInstruction)])
-    criticMessage = extractText(criticRes.content)
-    
-    if not criticMessage.strip().upper().startswith("PASS"):
-        return False, f"Critic Feedback:\n{criticMessage}"
-        
-    print("\n--- Single Tester Agent Verification ---")
-    testerPretext = (
-        "You are an experienced QA Automation Engineer.\n"
-        "- If automated unit tests do not exist or need updating for the new code, generate or modify test files using createFile or editFile.\n"
-        "- Run the appropriate tests in terminal using executeCommand (e.g. pytest, python -m unittest, npm test, or javac/java).\n"
-        "- If missing modules or third-party dependencies cause errors, install them using executeCommand and re-run tests.\n"
-        "- When all tests pass cleanly, respond starting strictly with 'PASS'.\n"
-        "- If assertions or code bugs persist, respond starting strictly with 'FAIL' followed by details."
-    )
-    testerInstruction = (
-        f"Tasks Evaluated: {taskNames}\n"
-        f"Batch Coder Changes:\n{summaryText}\n\n"
-        "Generate/update required unit tests, run test suite, and verify functionality for all batch tasks."
-    )
-    
-    testMsgs = [
-        SystemMessage(content=testerPretext),
-        HumanMessage(content=testerInstruction)
-    ]
-    
-    testerMessage = ""
-    for attempt in range(1, 4):
-        if attempt > 1:
-            print(f"\n[Batch Verification] Tester retry {attempt}/3")
-        testerRes = streamInvoke(agentModel, testMsgs)
-        testerMessage = extractText(testerRes.content)
-        
-        runTools = executeToolCalls(testerRes, tools)
-        for tr in runTools:
-            print(tr, "\n")
-            
-        if testerMessage.strip().upper().startswith("PASS"):
-            break
-        if not runTools:
-            break
-            
-        testMsgs.extend([
-            testerRes,
-            HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate output. If missing imports caused errors, install them and re-test. If tests passed cleanly, respond strictly with PASS. Otherwise FAIL.")
-        ])
-        
-    isPass = testerMessage.strip().upper().startswith("PASS")
-    if isPass:
-        print("\nBatch Verification finished successfully.\n")
+    finalState = evalWorkflow.invoke(initialState)
+    if finalState.get("success"):
         return True, "Batch verified successfully."
-        
-    return False, f"Tester Execution Failed:\n{testerMessage}"
+    return False, finalState.get("feedback", "Batch evaluation failed.")
 
 def runAgent(instruction, taskContext=""):
     print("Indexing workspace...")
