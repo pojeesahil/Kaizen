@@ -55,7 +55,7 @@ class Scheduler:
         return runCoder(instruction, taskContext=dependencyContext, feedback=feedback)
 
     async def run(self) -> None:
-        self.load_ready_tasks()
+        self.loadReadyTasks()
 
         completedTasks = []
         allCoderResults = []
@@ -67,7 +67,7 @@ class Scheduler:
                 _, task_id = heapq.heappop(self.queue)
                 batch.append(self.dag.tasks[task_id])
 
-            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel")
+            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel ")
             coderResults = await asyncio.gather(
                 *(asyncio.to_thread(self.executeCoder, task) for task in batch)
             )

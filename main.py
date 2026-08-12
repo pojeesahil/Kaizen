@@ -193,7 +193,7 @@ def criticNode(state: AgentState) -> dict:
 def testerNode(state: AgentState) -> dict:
     print(f"\nTester iteration {state['iteration']}")
     
-    # Unit test generation commented out as per instructions
+    
     # genPretext = (
     #     "You are an experienced QA engineer.\n"
     #     "Review the codebase and recent modifications.\n"
@@ -242,10 +242,10 @@ def testerNode(state: AgentState) -> dict:
             break
 
         testOutput = "\n".join(runTools)
-        hasZeroExit = "Exit Code: 0" in testOutput
-        hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
+        has_zero_exit = "Exit Code: 0" in testOutput
+        has_error = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
 
-        if runTools and hasZeroExit and not hasError:
+        if runTools and has_zero_exit and not has_error:
             testerMessage = "PASS"
             print("\n[Auto-detected] Main file executed successfully (Exit Code: 0).")
             break
