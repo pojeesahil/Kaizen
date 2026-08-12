@@ -26,7 +26,7 @@ architectureKeywords: Dict[str, List[str]] = {
 }
 
 stackRecoms: Dict[str, Dict[str, str]] = {
-    "web_frontend": {"frontend_framework": "React", "styling": "TailwindCSS"},
+    "web_frontend":  {"frontend_framework": "React", "styling": "TailwindCSS"},
     "web_backend": {"backend_framework": "FastAPI", "database": "PostgreSQL"},
     "ai_ml": {"vector_db": "ChromaDB", "embedding_model": "sentence-transformers", "llm": "Qwen (local, offline)"},
     "cli": {"language": "Python", "cli_framework": "Typer"},
