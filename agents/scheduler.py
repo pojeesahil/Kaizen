@@ -14,8 +14,8 @@ class Scheduler:
         self.taskOutputs: dict[str, str] = {}
         self.taskFeedbacks: dict[str, str] = {}
 
-    def load_ready_tasks(self) -> None:
-        for task in self.dag.get_ready_tasks():
+    def loadReadyTasks(self) -> None:
+        for task in self.dag.getReadyTasks():
             if getattr(task, "status", "pending") != "pending":
                 continue
             task.status = "running"
@@ -36,7 +36,7 @@ class Scheduler:
         return runCoder(instruction, taskContext=dependencyContext, feedback=feedback)
 
     async def run(self) -> None:
-        self.load_ready_tasks()
+        self.loadReadyTasks()
 
         while self.queue:
             batch = []
@@ -45,7 +45,7 @@ class Scheduler:
                 _, task_id = heapq.heappop(self.queue)
                 batch.append(self.dag.tasks[task_id])
 
-            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel")
+            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel ")
             coderResults = await asyncio.gather(
                 *(asyncio.to_thread(self.executeCoder, task) for task in batch)
             )
@@ -65,4 +65,4 @@ class Scheduler:
                     task.status = "pending"
                     self.taskFeedbacks[task.id] = feedback
 
-            self.load_ready_tasks()
+            self.loadReadyTasks()

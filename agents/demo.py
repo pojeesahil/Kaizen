@@ -1,4 +1,3 @@
-import sys
 from prompt import PromptAgent
 from terminalui import TerminalUI
 
