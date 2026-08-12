@@ -344,7 +344,7 @@ def runAgent(instruction, taskContext=""):
         "iteration": 0,
         "success": False
     }
-    finalState = workflow.invoke(initialState)
+    finalState = evalWorkflow.invoke(initialState)
     if finalState["success"]:
         return True, finalState.get("coderMessage", "Task completed.")
     return False, finalState.get("feedback", "Execution failed")
@@ -370,7 +370,7 @@ if __name__ == "__main__":
             for t in dagPlan.taskNodes:
                 t.name = getattr(t, "objective", t.id)
                 t.agent = "Coding"
-                dag.add_task(t)
+                dag.addTask(t)
             dag.build()
             
             print("\nGenerated Tasks:")
@@ -379,7 +379,7 @@ if __name__ == "__main__":
                 print(f" - [{task.priority}] {task.objective} (deps: {deps})")
                 
             print("\nExecution Order:")
-            print(dag.topological_sort())
+            print(dag.topologicalSort())
             
             indexWorkspace()
             scheduler = Scheduler(dag, query)

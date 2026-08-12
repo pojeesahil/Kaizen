@@ -25,18 +25,18 @@ class DAG:
     def topologicalSort(self):
         inDegree = self.inDegree.copy()
         queue = deque([taskId for taskId, deg in inDegree.items() if deg == 0])
-        sorted_order = []
+        sortedOrder = []
 
         while queue:
             node = queue.popleft()
-            sorted_order.append(node)
+            sortedOrder.append(node)
 
             for neighbor in self.graph[node]:
                 inDegree[neighbor] -= 1
                 if inDegree[neighbor] == 0:
                     queue.append(neighbor)
 
-        return sorted_order
+        return sortedOrder
 
     def getReadyTasks(self):
         return [

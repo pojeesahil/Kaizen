@@ -33,8 +33,8 @@ class Scheduler:
 
         return Files
 
-    def load_ready_tasks(self) -> None:
-        for task in self.dag.get_ready_tasks():
+    def loadReadyTasks(self) -> None:
+        for task in self.dag.getReadyTasks():
             if getattr(task, "status", "pending") != "pending":
                 continue
             task.status = "running"
@@ -64,23 +64,23 @@ class Scheduler:
             batch = []
 
             while self.queue:
-                _, task_id = heapq.heappop(self.queue)
-                batch.append(self.dag.tasks[task_id])
+                _, taskId = heapq.heappop(self.queue)
+                batch.append(self.dag.tasks[taskId])
 
-            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel ")
+            print(f"\nRunning {len(batch)} Coder Agent(s) in Parallel")
             coderResults = await asyncio.gather(
                 *(asyncio.to_thread(self.executeCoder, task) for task in batch)
             )
 
             for task, res in zip(batch, coderResults):
-                self.dag.mark_complete(task.id)
+                self.dag.markComplete(task.id)
                 self.taskOutputs[task.id] = res.get("coderMessage", "Task completed.")
                 self.taskFeedbacks.pop(task.id, None)
 
             completedTasks.extend(batch)
             allCoderResults.extend(coderResults)
 
-            self.load_ready_tasks()
+            self.loadReadyTasks()
 
         if completedTasks:
             from main import runBatchEval
@@ -106,7 +106,7 @@ class Scheduler:
                         )
                         setattr(NewTask, "name", f"Fix {PathStr}")
                         setattr(NewTask, "agent", "Coding")
-                        self.dag.add_task(NewTask)
+                        self.dag.addTask(NewTask)
 
                         TaskFb = f"Target File: {PathStr}\nQA Feedback:\n{feedback}"
                         self.taskFeedbacks[TaskId] = TaskFb
@@ -118,7 +118,7 @@ class Scheduler:
                         print(f"[FAILED] {tname}")
                         task.status = "pending"
                         self.taskFeedbacks[task.id] = feedback
-                    self.load_ready_tasks()
+                    self.loadReadyTasks()
                     if self.queue:
                         await self.run()
 
