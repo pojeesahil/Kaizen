@@ -1,9 +1,9 @@
 from typing import List, Dict
-from agents.models import Deliverable
+from agents.models import Deliverable, newId
 
 KindDependencies: Dict[str, List[str]] = {
-    "frontend": [],
-    "ui_page": [],
+    "frontend": ["backend"],
+    "ui_page": ["backend"],
     "tests": ["backend", "frontend", "ui_page"],
     "documentation": ["backend", "frontend", "ui_page", "database_schema", "deployment_script", "ci_cd_workflow", "tests", "config"],
     "ci_cd_workflow": ["tests"],
@@ -28,6 +28,35 @@ class DependencyResolver:
                         deliverable.dependencies.append(Candidate.id)
             deliverable.dependencies = self._dedupe(deliverable.dependencies)
 
+        Deliverables = self._addIntegrationDeliverables(Deliverables)
+        return Deliverables
+
+    def _addIntegrationDeliverables(self, Deliverables: List[Deliverable]) -> List[Deliverable]:
+        CoreItems = []
+        for Item in Deliverables:
+            if Item.kind not in ("documentation", "tests", "integration", "ci_cd_workflow"):
+                CoreItems.append(Item)
+
+        if len(CoreItems) >= 2:
+            for Index in range(len(CoreItems) - 1):
+                ItemA = CoreItems[Index]
+                ItemB = CoreItems[Index + 1]
+
+                IntegrationName = f"Integration ({ItemA.name} and {ItemB.name})"
+                ScopeMsg = (
+                    f"Wire and connect {ItemA.name} and {ItemB.name} into a single unified application. "
+                    f"CRITICAL: Use editFile to integrate them end-to-end — e.g. for backend files, import modules, initialize DB/service connections, and call functions; for backend and frontend, serve HTML/static routes and wire API endpoints."
+                )
+                IntegrationItem = Deliverable(
+                    id=newId(f"integration_{Index}"),
+                    name=IntegrationName,
+                    kind="integration",
+                    goal=f"Connect and integrate {ItemA.name} with {ItemB.name}",
+                    scope=ScopeMsg,
+                    dependencies=self._dedupe([ItemA.id, ItemB.id])
+                )
+                Deliverables.append(IntegrationItem)
+
         return Deliverables
 
     @staticmethod
@@ -39,3 +68,4 @@ class DependencyResolver:
                 Seen.add(Item)
                 Result.append(Item)
         return Result
+

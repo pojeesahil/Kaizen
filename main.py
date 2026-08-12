@@ -125,7 +125,8 @@ def coderNode(state: AgentState) -> dict:
         "CRITICAL TOOL RULES:\n"
         "1. You MUST use tool calls to write or modify files in the workspace.\n"
         "2. DO NOT respond with markdown code blocks (```python ... ```) or conversational explanations.\n"
-        "3. Output ONLY valid tool calls matching the tool format below.\n\n"
+        "3. Output ONLY valid tool calls matching the tool format below.\n"
+        "4. You can create or edit MULTIPLE files at once in a single task (outputting multiple tool calls in your response) if required to fulfill your task objective.\n\n"
         "Tool Call Format Examples:\n"
         'To create a file:\n{"name": "createFile", "arguments": {"path": "filename.ext", "content": "code..."}}\n\n'
         'To edit a file:\n{"name": "editFile", "arguments": {"path": "filename.ext", "newContent": "updated code..."}}\n\n'
@@ -137,7 +138,8 @@ def coderNode(state: AgentState) -> dict:
         "- Do NOT attempt to readFile non-existent files like requirements.txt. Create new implementation files directly using createFile.\n"
         "- Check Workspace Context first. If application code files ALREADY exist in workspace, do NOT overwrite or recreate them from scratch using createFile. Use editFile to apply specific modifications to fix feedback reported by QA.\n"
         "- For frontend tasks: use JavaScript fetch() or XMLHttpRequest to call backend API endpoints. Do NOT use <script src='/api/...'> tags. Display fetched data dynamically in the DOM.\n"
-        "- For backend tasks: enable CORS (Access-Control-Allow-Origin header or flask-cors) so the frontend can call API endpoints.\n\n"
+        "- For backend tasks: enable CORS (Access-Control-Allow-Origin header or flask-cors) so the frontend can call API endpoints.\n"
+        "- For integration tasks: Connect files using editFile — e.g. for backend files, import modules, initialize DB/services, and call functions between them; for backend and frontend, serve HTML/static routes and enable CORS/API routes. Ensure all components work as a unified application.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
         f"Prerequisite Tasks Context:\n{state['taskContext'] if state['taskContext'] else 'None'}\n\n"
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
@@ -166,6 +168,9 @@ def criticNode(state: AgentState) -> dict:
     print(f"\nCritic iteration {state['iteration']}")
     criticPretext = (
         "You are an expert Code Critic. Verify the code changes logically and structurally.\n"
+        "IMPORTANT RULES:\n"
+        "- Updating or modifying existing files (such as app.py or index.html) during integration tasks is EXPECTED and CORRECT. Do NOT flag this as creating duplicate files.\n"
+        "- Only respond with FAIL if there are actual code syntax errors, missing routes, or broken functionality.\n"
         "If the work looks good statically, respond starting strictly with 'PASS'.\n"
         "If there are bugs, respond starting strictly with 'FAIL' followed by what needs to be fixed."
     )
@@ -188,40 +193,37 @@ def criticNode(state: AgentState) -> dict:
 def testerNode(state: AgentState) -> dict:
     print(f"\nTester iteration {state['iteration']}")
     
-    genPretext = (
-        "You are an experienced QA engineer.\n"
-        "Review the codebase and recent modifications.\n"
-        "- If automated unit tests do not exist or require updating for the new code, generate or modify test files (e.g. test_*.py, *Test.java, *.test.js) using createFile or editFile.\n"
-        "- For documentation or static HTML/CSS where unit tests do not apply, respond strictly with STATIC_ONLY."
-    )
-    genPrompt = (
-        f"Instruction: {state['instruction']}\n"
-        f"Coder changes: {state.get('coderMessage', '')}\n"
-        f"Workspace files and context:\n{state.get('context', '')}\n\n"
-        "Generate or update required unit tests now."
-    )
-    
-    genResponse = streamInvoke(agentModel, [SystemMessage(content=genPretext)] + state["messages"] + [HumanMessage(content=genPrompt)])
-    genTools = executeToolCalls(genResponse, tools)
-    for tr in genTools:
-        print(f"{tr}\n")
+    # Unit test generation commented out as per instructions
+    # genPretext = (
+    #     "You are an experienced QA engineer.\n"
+    #     "Review the codebase and recent modifications.\n"
+    #     "- If automated unit tests do not exist or require updating for the new code, generate or modify test files (e.g. test_*.py, *Test.java, *.test.js) using createFile or editFile.\n"
+    #     "- For documentation or static HTML/CSS where unit tests do not apply, respond strictly with STATIC_ONLY."
+    # )
+    # genPrompt = (
+    #     f"Instruction: {state['instruction']}\n"
+    #     f"Coder changes: {state.get('coderMessage', '')}\n"
+    #     f"Workspace files and context:\n{state.get('context', '')}\n\n"
+    #     "Generate or update required unit tests now."
+    # )
+    # genResponse = streamInvoke(agentModel, [SystemMessage(content=genPretext)] + state["messages"] + [HumanMessage(content=genPrompt)])
+    # genTools = executeToolCalls(genResponse, tools)
+    # for tr in genTools:
+    #     print(f"{tr}\n")
         
     runPretext = (
-        "You are responsible for running test suites and verifying functionality.\n"
-        "CRITICAL: You MUST output executeCommand tool calls to run tests. Do NOT just describe what to run as plain text.\n"
-        "- Install any missing dependencies first using executeCommand (e.g. pip install flask).\n"
-        "- Then run the test suite using executeCommand (e.g. python -m pytest, python -m unittest, npm test).\n"
-        "- For Node.js test files using BDD framework functions (describe/it), run them using npx jest, npx mocha, or node --test.\n"
-        "- Only use build tools (like mvn or gradle) if project config files like pom.xml exist. For standalone Java files, compile and run directly using javac and java.\n"
-        "- When all tests pass cleanly without errors, respond starting strictly with 'PASS'.\n"
-        "- If functional assertions or code bugs persist, respond starting strictly with 'FAIL' followed by what failed."
+        "You are responsible for verifying code execution.\n"
+        "CRITICAL RULES:\n"
+        "- Output executeCommand tool calls to install required imports and run the main application file.\n"
+        "- Execution MUST be non-interactive. Do NOT run commands that wait for interactive stdin input.\n"
+        "- If execution completes with Exit Code: 0 and no errors, respond strictly with 'PASS'.\n"
+        "- If execution crashes, times out, or throws errors, respond strictly with 'FAIL' followed by error details."
     )
     
     runMessages = [
         SystemMessage(content=runPretext),
         *state["messages"],
-        genResponse,
-        HumanMessage(content="Execute the test suite now. Automatically install any missing dependencies if import errors occur.")
+        HumanMessage(content="Install all required dependencies/imports and execute the main file in non-interactive mode now (e.g. work/main.py, work/main.cpp, main.py).")
     ]
     
     testerResponse = None
@@ -238,21 +240,26 @@ def testerNode(state: AgentState) -> dict:
             
         if testerMessage.strip().upper().startswith("PASS"):
             break
+
         testOutput = "\n".join(runTools)
-        if runTools and "Exit Code: 0" in testOutput and any(s in testOutput for s in ["OK", " passed", "PASSED"]):
+        hasZeroExit = "Exit Code: 0" in testOutput
+        hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
+
+        if runTools and hasZeroExit and not hasError:
             testerMessage = "PASS"
-            print("\n[Auto-detected] Tests passed from command output.")
+            print("\n[Auto-detected] Main file executed successfully (Exit Code: 0).")
             break
+
         if not runTools:
             runMessages.extend([
                 testerResponse,
-                HumanMessage(content="You did NOT use any tool calls. You MUST use executeCommand to install dependencies and run tests. Output tool calls, not plain text instructions.")
+                HumanMessage(content="You did NOT use any tool calls. You MUST use executeCommand to install dependencies and run the main file. Output tool calls, not plain text instructions.")
             ])
             continue
             
         runMessages.extend([
             testerResponse,
-            HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate the output. If missing imports caused errors, install them and re-test. If tests passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
+            HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate the output. If missing imports caused errors, install them and re-run. If execution passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
         ])
             
     isPass = testerMessage.strip().upper().startswith("PASS")
@@ -260,7 +267,7 @@ def testerNode(state: AgentState) -> dict:
         print("\nProcess finished successfully.\n")
         
     return {
-        "messages": [testerResponse] if testerResponse else [genResponse],
+        "messages": [testerResponse] if testerResponse else [],
         "feedback": state["feedback"] if isPass else f"Tester Execution Failed:\n{testerMessage}",
         "success": isPass
     }

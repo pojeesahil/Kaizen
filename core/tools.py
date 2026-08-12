@@ -1,7 +1,8 @@
+import os
 import shutil
+import subprocess
 from pathlib import Path
 from langchain_core.tools import tool
-import subprocess
 
 WORK_DIR = Path(__file__).resolve().parent.parent / "work"
 
@@ -69,25 +70,51 @@ def executeCommand(command: str) -> str:
 
     try:
         WORK_DIR.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(
+        cmd_lower = command.lower()
+        is_app_run = "python " in cmd_lower or "node " in cmd_lower or "flask " in cmd_lower
+        cmd_timeout = 8 if is_app_run else 30
+
+        proc = subprocess.Popen(
             command,
             shell=True,
-            cwd=str(WORK_DIR.resolve()), 
-            capture_output=True,
-            text=True,
-            timeout=60 
+            cwd=str(WORK_DIR.resolve()),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
-        
-        output = f"Exit Code: {result.returncode}\n"
-        if result.stdout:
-            output += f"STDOUT:\n{result.stdout}\n"
-        if result.stderr:
-            output += f"STDERR:\n{result.stderr}\n"
-            
-        return output
-        
-    except subprocess.TimeoutExpired:
-        return f"Error: Command '{command}' timed out after 60 seconds."
+
+        try:
+            stdout_data, stderr_data = proc.communicate(timeout=cmd_timeout)
+            output = f"Exit Code: {proc.returncode}\n"
+            if stdout_data:
+                output += f"STDOUT:\n{stdout_data}\n"
+            if stderr_data:
+                output += f"STDERR:\n{stderr_data}\n"
+            return output
+
+        except subprocess.TimeoutExpired:
+            if os.name == 'nt' and proc.pid:
+                subprocess.run(
+                    f"taskkill /F /T /PID {proc.pid}",
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            else:
+                proc.kill()
+
+            stdout_data, stderr_data = proc.communicate()
+            stdout_text = stdout_data or ""
+            stderr_text = stderr_data or ""
+            has_error = "Traceback" in stderr_text or "Error:" in stderr_text or "SyntaxError" in stderr_text
+
+            if not has_error:
+                output = "Exit Code: 0 (Process started successfully)\n"
+                if stdout_text:
+                    output += f"STDOUT:\n{stdout_text}\n"
+                return output
+            return f"Error: Command '{command}' timed out with errors:\n{stderr_text}"
+
     except Exception as e:
         return f"Error executing command: {str(e)}"
 

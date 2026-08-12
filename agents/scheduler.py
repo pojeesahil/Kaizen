@@ -1,5 +1,6 @@
 import asyncio
 import heapq
+import re
 
 from agents.dag import DAG
 from agents.models import TaskNode
@@ -13,6 +14,24 @@ class Scheduler:
         self.queue: list[tuple[int, str]] = []
         self.taskOutputs: dict[str, str] = {}
         self.taskFeedbacks: dict[str, str] = {}
+
+    def extractAffectedFiles(self, CoderResults: list, Feedback: str) -> list[str]:
+        Files = []
+        for Result in CoderResults:
+            ToolLogs = Result.get("toolResults", [])
+            for Log in ToolLogs:
+                FoundPaths = re.findall(r"path['\"]?\s*:\s*['\"]([^'\"]+)['\"]", Log)
+                for PathStr in FoundPaths:
+                    if PathStr not in Files:
+                        Files.append(PathStr)
+
+        Pattern = r"\b[\w.-]+\.(?:py|js|ts|html|css|json|java|c|cpp)\b"
+        FeedbackFiles = re.findall(Pattern, Feedback)
+        for PathStr in FeedbackFiles:
+            if PathStr not in Files:
+                Files.append(PathStr)
+
+        return Files
 
     def load_ready_tasks(self) -> None:
         for task in self.dag.get_ready_tasks():
@@ -38,6 +57,9 @@ class Scheduler:
     async def run(self) -> None:
         self.load_ready_tasks()
 
+        completedTasks = []
+        allCoderResults = []
+
         while self.queue:
             batch = []
 
@@ -50,19 +72,53 @@ class Scheduler:
                 *(asyncio.to_thread(self.executeCoder, task) for task in batch)
             )
 
-            from main import runBatchEval
-            success, feedback = await asyncio.to_thread(runBatchEval, batch, coderResults)
+            for task, res in zip(batch, coderResults):
+                self.dag.mark_complete(task.id)
+                self.taskOutputs[task.id] = res.get("coderMessage", "Task completed.")
+                self.taskFeedbacks.pop(task.id, None)
 
-            if success:
-                for task, res in zip(batch, coderResults):
-                    self.dag.mark_complete(task.id)
-                    self.taskOutputs[task.id] = res.get("coderMessage", "Task completed.")
-                    self.taskFeedbacks.pop(task.id, None)
-            else:
-                for task in batch:
-                    tname = getattr(task, "name", getattr(task, "objective", task.id))
-                    print(f"[FAILED] {tname}")
-                    task.status = "pending"
-                    self.taskFeedbacks[task.id] = feedback
+            completedTasks.extend(batch)
+            allCoderResults.extend(coderResults)
 
             self.load_ready_tasks()
+
+        if completedTasks:
+            from main import runBatchEval
+            success, feedback = await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
+
+            if not success:
+                AffectedFiles = self.extractAffectedFiles(allCoderResults, feedback)
+                if len(AffectedFiles) > 1:
+                    print(f"\n[QA Failure] Spawning {len(AffectedFiles)} file-specific repair agents:")
+                    for PathStr in AffectedFiles:
+                        print(f" - Target file: {PathStr}")
+
+                    for PathStr in AffectedFiles:
+                        CleanName = PathStr.replace(".", "_").replace("/", "_").replace("\\", "_")
+                        TaskId = f"fix_{CleanName}_{len(self.dag.tasks)}"
+                        NewTask = TaskNode(
+                            id=TaskId,
+                            deliverableId="repair",
+                            objective=f"Fix issues in file: {PathStr}",
+                            output=f"Repaired {PathStr}",
+                            completionCriteria=f"Passes QA verification for {PathStr}",
+                            priority=1
+                        )
+                        setattr(NewTask, "name", f"Fix {PathStr}")
+                        setattr(NewTask, "agent", "Coding")
+                        self.dag.add_task(NewTask)
+
+                        TaskFb = f"Target File: {PathStr}\nQA Feedback:\n{feedback}"
+                        self.taskFeedbacks[TaskId] = TaskFb
+
+                    await self.run()
+                else:
+                    for task in completedTasks:
+                        tname = getattr(task, "name", getattr(task, "objective", task.id))
+                        print(f"[FAILED] {tname}")
+                        task.status = "pending"
+                        self.taskFeedbacks[task.id] = feedback
+                    self.load_ready_tasks()
+                    if self.queue:
+                        await self.run()
+
