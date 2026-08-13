@@ -2,8 +2,10 @@ import asyncio
 import heapq
 
 from agents.dag import DAG
-
-
+import os
+from main import runBatchEval 
+from rag.rag import indexWorkspace
+from main import runCoder
 class Scheduler:
 
     def __init__(self, dag: DAG, goal: str = ""):
@@ -23,14 +25,14 @@ class Scheduler:
     def executeCoder(self, task) -> dict:
         tname = getattr(task, "name", getattr(task, "objective", task.id))
         print(f"\n[{getattr(task, 'agent', 'Coding')}] Starting Coder Agent for task: {tname}")
-        from main import runCoder
+        
 
         dependencyContext = ""
         for depId in getattr(task, "dependencies", []):
             if depId in self.taskOutputs:
                 dependencyContext += f"\n- Parent task '{depId}' completed: {self.taskOutputs[depId]}"
 
-        # Provide actual file contents from workspace so the agent sees real code
+       
         workFiles = self._readWorkspaceFiles()
         if workFiles:
             dependencyContext += "\n\nCurrent workspace file contents:\n" + workFiles
@@ -41,7 +43,7 @@ class Scheduler:
 
     def _readWorkspaceFiles(self) -> str:
         """Read all source files from the work directory and return their contents."""
-        import os
+        
         workDir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
         if not os.path.exists(workDir):
             return ""
@@ -93,8 +95,8 @@ class Scheduler:
                 self.taskOutputs[task.id] = result.get("coderMessage", "Task completed.")
                 self.taskFeedbacks.pop(task.id, None)
 
-                # Re-index workspace so the next agent can see newly created/modified files
-                from rag.rag import indexWorkspace
+               
+                
                 await asyncio.to_thread(indexWorkspace)
 
             completedTasks.extend(batch)
@@ -103,7 +105,7 @@ class Scheduler:
             self.loadReadyTasks()
 
         if completedTasks:
-            from main import runBatchEval
+           
             success, feedback = await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
 
             if not success:
