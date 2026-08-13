@@ -86,24 +86,16 @@ class GraphifyVectorRAG(RAGInterface):
 
     def retrieve(self, query, top_k=5):
         """Retrieve and rerank candidates using LangChain ContextualCompressionRetriever."""
-        # 1. Setup our base retriever wrapper
         base_retriever = BaseRAGRetriever(rag_instance=self)
-
-        # 2. Setup the LLM reranker/compressor
         compressor = SimpleLLMReranker(llm=llm, top_n=top_k)
-
-        # 3. Create the ContextualCompressionRetriever
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor,
             base_retriever=base_retriever
         )
 
-        # 4. Invoke the retrieval and compression pipeline
         try:
-            print(f"[Reranker] Retrieving and reranking top {top_k} results using LangChain...")
+            print(f"[Reranker] Retrieving and reranking top {top_k} results...")
             compressed_docs = compression_retriever.invoke(query)
-            
-            # Format documents back to original dictionary format
             results = []
             for doc in compressed_docs:
                 results.append({

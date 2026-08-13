@@ -33,8 +33,6 @@ class BasicRAG(RAGInterface):
                         text = f.read()
                 except:
                     continue
-
-
                 self._chunk_file(text, fpath)
 
         print(f"[BasicRAG] indexed {len(self.chunks)} chunks from {path}")
@@ -42,6 +40,7 @@ class BasicRAG(RAGInterface):
     def _chunk_file(self, text, fpath):
         lines = text.split("\n")
         buf = []
+        added = 0
 
         for line in lines:
             buf.append(line)
@@ -49,14 +48,16 @@ class BasicRAG(RAGInterface):
                 chunk = "\n".join(buf)
                 if chunk.strip():
                     self.chunks.append({"content": chunk, "file_path": fpath})
+                    added += 1
                 buf = []
 
         if buf:
             chunk = "\n".join(buf)
             if chunk.strip():
                 self.chunks.append({"content": chunk, "file_path": fpath})
+                added += 1
 
-        if not self.chunks and text.strip():
+        if added == 0 and text.strip():
             self.chunks.append({"content": text, "file_path": fpath})
 
     def retrieve(self, query, top_k=5):
