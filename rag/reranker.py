@@ -28,7 +28,7 @@ class SimpleLLMReranker(BaseDocumentCompressor):
         if not documents:
             return []
 
-        # Construct the ranking prompt
+
         prompt = (
             "You are an expert reranker. Given a user query and a list of code snippets (documents), "
             "determine which snippets are most relevant to the query.\n\n"
@@ -50,7 +50,6 @@ class SimpleLLMReranker(BaseDocumentCompressor):
             response = self.llm.invoke(prompt)
             content = response.content.strip()
 
-            # Parse indices list from LLM output
             match = re.search(r"\[\s*\d+\s*(?:,\s*\d+\s*)*\]", content)
             if match:
                 ordered_indices = json.loads(match.group(0))
@@ -64,7 +63,6 @@ class SimpleLLMReranker(BaseDocumentCompressor):
                     reranked_docs.append(documents[idx])
                     seen_indices.add(idx)
 
-            # Append remaining documents
             for idx, doc in enumerate(documents):
                 if idx not in seen_indices:
                     reranked_docs.append(doc)
@@ -87,7 +85,7 @@ class BaseRAGRetriever(BaseRetriever):
     def _get_relevant_documents(
         self, query: str, *, run_manager: Optional[Any] = None
     ) -> List[Document]:
-        # Fetch initial candidates from vector and graph stores
+
         candidates = self.rag_instance.retrieve_candidates(query, top_k=15)
         docs = []
         for r in candidates:
