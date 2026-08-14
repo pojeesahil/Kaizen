@@ -28,11 +28,11 @@ Return ONLY a JSON object with this exact structure, no other text:
 }}"""
 
 
-def _get_planner_llm():
+def getPlannerLLM():
     return get_llm(model_name="qwen2.5:7b", temperature = 0)
 
 
-def _parse_llm_json(text: str):
+def parseLLMjson(text: str):
     text = text.strip()
     try:
         return json.loads(text)
@@ -67,9 +67,9 @@ def validateTasks(data) -> List[dict]:
     return valid
 
 
-def _call_llm_for_tasks(deliverable: Deliverable) -> List[dict]:
+def callLLMforTasks(deliverable: Deliverable) -> List[dict]:
 
-    llm = _get_planner_llm()
+    llm = getPlannerLLM()
     prompt_text = TASK_DECOMPOSITION_PROMPT.format(
         name = deliverable.name,
         kind = deliverable.kind,
@@ -81,7 +81,7 @@ def _call_llm_for_tasks(deliverable: Deliverable) -> List[dict]:
         try:
             response = llm.invoke(prompt_text)
             text = response.content if hasattr(response, "content") else str(response)
-            parsed = _parse_llm_json(text)
+            parsed = parseLLMjson(text)
             tasks = validateTasks(parsed)
             if tasks:
                 return tasks
@@ -95,7 +95,7 @@ def _call_llm_for_tasks(deliverable: Deliverable) -> List[dict]:
 class DeliverablePlanner:
 
     def plan(self, Deliverable: Deliverable) -> DeliverablePlan:
-        LlmTasks = _call_llm_for_tasks(Deliverable)
+        LlmTasks = callLLMforTasks(Deliverable)
         Priority = Deliverable.priority
         Tasks = self._buildTaskChain(Deliverable, LlmTasks, Priority)
         return DeliverablePlan(deliverable=Deliverable, tasks=Tasks)
@@ -107,7 +107,7 @@ class DeliverablePlanner:
         Tasks: List[TaskNode] = []
         PreviousId: Optional[str] = None
 
-        for Index, LlmTask in enumerate(LlmTasks, start=1):
+        for Index, LlmTask in enumerate(LlmTasks, start = 1):
             TaskId = newId(f"{Deliverable.id}-t{Index}")
             IsLast = Index == len(LlmTasks)
             Task = TaskNode(

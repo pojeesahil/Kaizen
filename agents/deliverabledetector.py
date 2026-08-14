@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 from agents.models import Deliverable, newId
 
 
-def _dedupe(Items: List[Any]) -> List[str]:
+def dedupe(Items: List[Any]) -> List[str]:
     Seen = set()
     Result = []
     for Item in Items:

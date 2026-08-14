@@ -33,11 +33,11 @@ User request:
 """
 
 
-def _get_planner_llm():
-    return get_llm(model_name="qwen2.5:7b", temperature=0)
+def getPlannerLLM():
+    return get_llm(model_name="qwen2.5:7b", temperature = 0)
 
 
-def _parse_llm_json(text: str) -> Any:
+def parseLLMjson(text: str) -> Any:
 
     text = text.strip()
     try:
@@ -79,7 +79,7 @@ def validateDeliverables(data: Any) -> List[Dict]:
     return valid
 
 
-def _fallback_deliverable(userPrompt: str) -> List[Dict]:
+def fallbackDeliverable(userPrompt: str) -> List[Dict]:
 
     return [{
         "id": "deliverable_1",
@@ -92,16 +92,16 @@ def _fallback_deliverable(userPrompt: str) -> List[Dict]:
     }]
 
 
-def _call_llm_for_deliverables(userPrompt: str) -> List[Dict]:
+def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
 
-    llm = _get_planner_llm()
+    llm = getPlannerLLM()
     prompt_text = ANALYSIS_PROMPT + userPrompt.strip()
 
     for attempt in range(2):
         try:
             response = llm.invoke(prompt_text)
             text = response.content if hasattr(response, "content") else str(response)
-            parsed = _parse_llm_json(text)
+            parsed = parseLLMjson(text)
             deliverables = validateDeliverables(parsed)
             if deliverables:
                 return deliverables
@@ -109,12 +109,12 @@ def _call_llm_for_deliverables(userPrompt: str) -> List[Dict]:
             print(f"[PromptAgent] LLM call attempt {attempt + 1} failed: {e}")
 
     print("[PromptAgent] WARNING: LLM analysis failed, using fallback deliverable.")
-    return _fallback_deliverable(userPrompt)
+    return fallbackDeliverable(userPrompt)
 
 
 class PromptAgent:
     def process(self, userPrompt: str) -> Dict:
-        deliverables = _call_llm_for_deliverables(userPrompt)
+        deliverables = callLLMforDeliverables(userPrompt)
 
         names = [d["name"] for d in deliverables]
         intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"

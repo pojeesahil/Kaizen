@@ -25,19 +25,19 @@ class DependencyResolver:
 
             d.dependencies = Remapped
 
-            d.dependencies = self._dedupe(d.dependencies)
+            d.dependencies = self.dedupe(d.dependencies)
 
             d.dependencies = [dep for dep in d.dependencies if dep != d.id]
 
             d.dependencies = [dep for dep in d.dependencies if dep in IdSet]
 
-        self._breakCycles(Deliverables)
+        self.breakCycles(Deliverables)
 
-        self._alignPriorities(Deliverables)
+        self.alignPriorities(Deliverables)
 
         return Deliverables
 
-    def _breakCycles(self, Deliverables: List[Deliverable]) -> None:
+    def breakCycles(self, Deliverables: List[Deliverable]) -> None:
 
         Graph: Dict[str, List[str]] = {d.id: list(d.dependencies) for d in Deliverables}
         White, Grey, Black = 0, 1, 2
@@ -66,7 +66,7 @@ class DependencyResolver:
                     ById[Source].dependencies.remove(Target)
                     print(f"[DependencyResolver] Broke cycle: removed {Source} -> {Target}")
 
-    def _alignPriorities(self, Deliverables: List[Deliverable]) -> None:
+    def alignPriorities(self, Deliverables: List[Deliverable]) -> None:
 
         ById = {d.id: d for d in Deliverables}
         Changed = True
@@ -80,7 +80,7 @@ class DependencyResolver:
                         Changed = True
 
     @staticmethod
-    def _dedupe(Ids: List[str]) -> List[str]:
+    def dedupe(Ids: List[str]) -> List[str]:
         Seen: Set[str] = set()
         Result = []
         for Item in Ids:
