@@ -2,8 +2,8 @@ import asyncio
 import heapq
 import re
 
-from agents.dag import DAG
-from agents.models import TaskNode
+from dag import DAG
+from models import TaskNode
 
 
 class Scheduler:
@@ -97,12 +97,12 @@ class Scheduler:
                         CleanName = PathStr.replace(".", "_").replace("/", "_").replace("\\", "_")
                         TaskId = f"fix_{CleanName}_{len(self.dag.tasks)}"
                         NewTask = TaskNode(
-                            id=TaskId,
-                            deliverableId="repair",
-                            objective=f"Fix issues in file: {PathStr}",
-                            output=f"Repaired {PathStr}",
-                            completionCriteria=f"Passes QA verification for {PathStr}",
-                            priority=1
+                            id = TaskId,
+                            deliverableId = "repair",
+                            objective = f"Fix issues in file: {PathStr}",
+                            output = f"Repaired {PathStr}",
+                            completionCriteria = f"Passes QA verification for {PathStr}",
+                            priority = 1
                         )
                         setattr(NewTask, "name", f"Fix {PathStr}")
                         setattr(NewTask, "agent", "Coding")

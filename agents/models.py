@@ -11,11 +11,9 @@ class TaskStatus(str, Enum):
     DONE = "done"
     FAILED = "failed"
 
-
 def newId(Prefix: str) -> str:
 
     return f"{Prefix}-{uuid.uuid4().hex[:6]}"
-
 
 @dataclass
 class TaskResult:
@@ -38,7 +36,6 @@ class TaskNode:
     status: TaskStatus = TaskStatus.PENDING
     metadata: dict = field(default_factory = dict)
 
-
 @dataclass
 class Deliverable:
 
@@ -46,10 +43,13 @@ class Deliverable:
     name: str
     kind: str
     goal: str
-    scope: str
+    scope: str = ""
     requiredFiles: List[str] = field(default_factory = list)
     explicitFilenames: List[str] = field(default_factory = list)
     dependencies: List[str] = field(default_factory = list)
+    priority: int = 3
+    requirements: List[str] = field(default_factory = list)
+    reasoning: str = ""
     metadata: dict = field(default_factory = dict)
 
 

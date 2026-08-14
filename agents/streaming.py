@@ -20,11 +20,11 @@ ThinkingSummaries = {
 
 class StreamingPlanner:
 
-    def __init__(self) -> None:
-        self.Detector = DeliverableDetector()
-        self.Resolver = DependencyResolver()
-        self.Planner = DeliverablePlanner()
-        self.Merger = DAGMerger()
+    def __init__(self, Detector=None, Resolver=None, Planner=None, Merger=None) -> None:
+        self.Detector = Detector or DeliverableDetector()
+        self.Resolver = Resolver or DependencyResolver()
+        self.Planner = Planner or DeliverablePlanner()
+        self.Merger = Merger or DAGMerger()
         self.LastResult = None
 
     def planStream(self, PromptAgentOutput: Dict[str, Any]) -> Iterator[PlanningEvent]:
@@ -41,6 +41,7 @@ class StreamingPlanner:
         for Index, Deliverable in enumerate(Deliverables, start=1):
             yield PlanningEvent(stage = "deliverable", icon = "Plan", message = f"Planning {Deliverable.name}", deliverableName = Deliverable.name, progress = (Index - 1) / Total)
             yield PlanningEvent(stage = "deliverable", icon = "...", message = self._thinkingSummary(Deliverable), deliverableName = Deliverable.name)
+            yield PlanningEvent(stage = "deliverable", icon = "...", message = "Decomposing into tasks...", deliverableName = Deliverable.name)
 
             Plan = self.Planner.plan(Deliverable)
             Plans.append(Plan)
@@ -57,6 +58,8 @@ class StreamingPlanner:
         yield PlanningEvent(stage = "done", icon = "Done", message = f"Done. {len(DagPlan.taskNodes)} tasks across {len(Deliverables)} deliverables.", progress = 1.0)
 
         self.LastResult = DagPlan
+
+    stream_plan = planStream
 
     @staticmethod
     def _thinkingSummary(Deliverable: Deliverable) -> str:

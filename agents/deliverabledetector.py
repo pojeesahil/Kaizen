@@ -1,55 +1,6 @@
 import re
 from typing import List, Dict, Any
-from agents.models import Deliverable, newId
-
-ExtensionKind = {
-    ".html": "ui_page",
-    ".css": "stylesheet",
-    ".js": "frontend_script",
-    ".ts": "frontend_script",
-    ".py": "backend_module",
-    ".md": "documentation",
-    ".yml": "ci_cd_workflow",
-    ".yaml": "ci_cd_workflow",
-    ".json": "config",
-    ".env": "config",
-    ".sql": "database_schema",
-    ".sh": "deployment_script",
-}
-
-KeywordKind = {
-    "backend": "backend",
-    "api": "backend",
-    "frontend": "frontend",
-    "ui": "frontend",
-    "database": "database_schema",
-    "schema": "database_schema",
-    "test": "tests",
-    "readme": "documentation",
-    "docker": "deployment_script",
-    "ci": "ci_cd_workflow",
-    "cd": "ci_cd_workflow",
-    "pipeline": "ci_cd_workflow",
-    "deploy": "deployment_script",
-    "config": "config",
-}
-
-
-def _classify(Name: str) -> str:
-
-    Lower = Name.strip().lower()
-    for Ext, Kind in ExtensionKind.items():
-        if Lower.endswith(Ext):
-            return Kind
-    for Keyword, Kind in KeywordKind.items():
-        if Keyword in Lower:
-            return Kind
-    return "generic"
-
-
-def _looksLikeFilename(Name: str) -> bool:
-
-    return bool(re.match(r"^[\w\-]+\.[A-Za-z0-9]+$", Name.strip()))
+from models import Deliverable, newId
 
 
 def _dedupe(Items: List[Any]) -> List[str]:
@@ -67,43 +18,51 @@ def _dedupe(Items: List[Any]) -> List[str]:
 class DeliverableDetector:
 
     def detect(self, PromptAgentOutput: Dict[str, Any]) -> List[Deliverable]:
-        RawNames = list(PromptAgentOutput.get("deliverables", []) or [])
-
-        SpecText = PromptAgentOutput.get("engineering_specification", "") or ""
-        RawNames += re.findall(r"\b[\w\-]+\.[A-Za-z0-9]{1,5}\b", SpecText)
-
-        RawNames = _dedupe(RawNames)
+        RawDeliverables = list(PromptAgentOutput.get("deliverables", []) or [])
 
         Deliverables: List[Deliverable] = []
-        for Name in RawNames:
-            Kind = _classify(Name)
-            Explicit = [Name] if _looksLikeFilename(Name) else []
+        SeenIds = set()
+
+        for Item in RawDeliverables:
+            if not isinstance(Item, dict):
+                continue
+
+            RawId = str(Item.get("id", "")).strip()
+            if not RawId:
+                RawId = re.sub(r"\W+", "_", Item.get("name", "deliverable").lower()).strip("_")
+
+            BaseId = RawId
+            Counter = 1
+            while RawId in SeenIds:
+                RawId = f"{BaseId}_{Counter}"
+                Counter += 1
+
+            DeliverableId = newId(RawId)
+            SeenIds.add(RawId)
+
+            Name = str(Item.get("name", RawId)).strip()
+            Kind = str(Item.get("kind", "generic")).strip()
+            Goal = str(Item.get("goal", f"Create {Name}")).strip()
+            Requirements = Item.get("requirements", []) if isinstance(Item.get("requirements"), list) else []
+            Dependencies = Item.get("dependencies", []) if isinstance(Item.get("dependencies"), list) else []
+            Priority = Item.get("priority", 3)
+            if not isinstance(Priority, int):
+                try:
+                    Priority = int(Priority)
+                except (ValueError, TypeError):
+                    Priority = 3
+            Priority = max(1, min(5, Priority))
+
             Deliverables.append(
                 Deliverable(
-                    id=newId(re.sub(r"\W+", "_", Name.lower()).strip("_") or "deliverable"),
-                    name=Name,
-                    kind=Kind,
-                    goal=f"Create {Name}",
-                    scope=self._inferScope(Kind, PromptAgentOutput),
-                    requiredFiles=Explicit,
-                    explicitFilenames=Explicit,
+                    id =DeliverableId,
+                    name = Name,
+                    kind = Kind,
+                    goal = Goal,
+                    requirements = [str(r) for r in Requirements],
+                    dependencies = [str(d) for d in Dependencies],
+                    priority = Priority,
                 )
             )
+
         return Deliverables
-
-    @staticmethod
-    def _inferScope(Kind: str, PromptAgentOutput: Dict[str, Any]) -> str:
-
-        Architecture = PromptAgentOutput.get("architecture", "the project")
-        ScopeByKind = {
-            "ui_page": f"A single page within {Architecture}.",
-            "backend": f"Server-side logic and API surface for {Architecture}.",
-            "frontend": f"Client-side UI layer for {Architecture}.",
-            "database_schema": f"Persistent data model for {Architecture}.",
-            "documentation": f"Project documentation describing {Architecture}.",
-            "deployment_script": f"Build/runtime packaging for {Architecture}.",
-            "ci_cd_workflow": f"Automated pipeline for {Architecture}.",
-            "tests": f"Automated test coverage for {Architecture}.",
-            "config": f"Configuration values used by {Architecture}.",
-        }
-        return ScopeByKind.get(Kind, f"Independent artifact within {Architecture}.")

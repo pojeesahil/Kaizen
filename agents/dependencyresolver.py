@@ -1,71 +1,90 @@
-from typing import List, Dict
-from agents.models import Deliverable, newId
-
-KindDependencies: Dict[str, List[str]] = {
-    "frontend": ["backend"],
-    "ui_page": ["backend"],
-    "tests": ["backend", "frontend", "ui_page"],
-    "documentation": ["backend", "frontend", "ui_page", "database_schema", "deployment_script", "ci_cd_workflow", "tests", "config"],
-    "ci_cd_workflow": ["tests"],
-    "deployment_script": [],
-    "config": [],
-    "backend": ["database_schema"]
-}
+from typing import List, Dict, Set
+from agents.models import Deliverable
 
 
 class DependencyResolver:
 
     def resolve(self, Deliverables: List[Deliverable]) -> List[Deliverable]:
-        ByKind: Dict[str, List[Deliverable]] = {}
-        for deliverable in Deliverables:
-            ByKind.setdefault(deliverable.kind, []).append(deliverable)
+        IdSet = {d.id for d in Deliverables}
 
-        for deliverable in Deliverables:
-            NeededKinds = KindDependencies.get(deliverable.kind, [])
-            for Kind in NeededKinds:
-                for Candidate in ByKind.get(Kind, []):
-                    if Candidate.id != deliverable.id:
-                        deliverable.dependencies.append(Candidate.id)
-            deliverable.dependencies = self._dedupe(deliverable.dependencies)
+        LlmIdToActual: Dict[str, str] = {}
+        for d in Deliverables:
 
-        Deliverables = self._addIntegrationDeliverables(Deliverables)
-        return Deliverables
+            Parts = d.id.rsplit("-", 1)
+            if len(Parts) == 2:
+                LlmIdToActual[Parts[0]] = d.id
+            LlmIdToActual[d.id] = d.id
 
-    def _addIntegrationDeliverables(self, Deliverables: List[Deliverable]) -> List[Deliverable]:
-        CoreItems = []
-        for Item in Deliverables:
-            if Item.kind not in ("documentation", "tests", "integration", "ci_cd_workflow"):
-                CoreItems.append(Item)
+        for d in Deliverables:
 
-        if len(CoreItems) >= 2:
-            for Index in range(len(CoreItems) - 1):
-                ItemA = CoreItems[Index]
-                ItemB = CoreItems[Index + 1]
+            Remapped = []
+            for DepId in d.dependencies:
+                ActualId = LlmIdToActual.get(DepId)
+                if ActualId:
+                    Remapped.append(ActualId)
 
-                IntegrationName = f"Integration ({ItemA.name} and {ItemB.name})"
-                ScopeMsg = (
-                    f"Wire and connect {ItemA.name} and {ItemB.name} into a single unified application. "
-                    f"CRITICAL: Use editFile to integrate them end-to-end — e.g. for backend files, import modules, initialize DB/service connections, and call functions; for backend and frontend, serve HTML/static routes and wire API endpoints."
-                )
-                IntegrationItem = Deliverable(
-                    id=newId(f"integration_{Index}"),
-                    name=IntegrationName,
-                    kind="integration",
-                    goal=f"Connect and integrate {ItemA.name} with {ItemB.name}",
-                    scope=ScopeMsg,
-                    dependencies=self._dedupe([ItemA.id, ItemB.id])
-                )
-                Deliverables.append(IntegrationItem)
+            d.dependencies = Remapped
+
+            d.dependencies = self._dedupe(d.dependencies)
+
+            d.dependencies = [dep for dep in d.dependencies if dep != d.id]
+
+            d.dependencies = [dep for dep in d.dependencies if dep in IdSet]
+
+        self._breakCycles(Deliverables)
+
+        self._alignPriorities(Deliverables)
 
         return Deliverables
+
+    def _breakCycles(self, Deliverables: List[Deliverable]) -> None:
+
+        Graph: Dict[str, List[str]] = {d.id: list(d.dependencies) for d in Deliverables}
+        White, Grey, Black = 0, 1, 2
+        Color: Dict[str, int] = {d.id: White for d in Deliverables}
+        BackEdges: List[tuple] = []
+
+        def Dfs(Node: str) -> None:
+            Color[Node] = Grey
+            for Neighbor in Graph.get(Node, []):
+                if Neighbor not in Color:
+                    continue
+                if Color[Neighbor] == Grey:
+                    BackEdges.append((Node, Neighbor))
+                elif Color[Neighbor] == White:
+                    Dfs(Neighbor)
+            Color[Node] = Black
+
+        for d in Deliverables:
+            if Color[d.id] == White:
+                Dfs(d.id)
+
+        if BackEdges:
+            ById = {d.id: d for d in Deliverables}
+            for Source, Target in BackEdges:
+                if Source in ById and Target in ById[Source].dependencies:
+                    ById[Source].dependencies.remove(Target)
+                    print(f"[DependencyResolver] Broke cycle: removed {Source} -> {Target}")
+
+    def _alignPriorities(self, Deliverables: List[Deliverable]) -> None:
+
+        ById = {d.id: d for d in Deliverables}
+        Changed = True
+        while Changed:
+            Changed = False
+            for d in Deliverables:
+                for DepId in d.dependencies:
+                    Dep = ById.get(DepId)
+                    if Dep and Dep.priority > d.priority:
+                        Dep.priority = d.priority
+                        Changed = True
 
     @staticmethod
     def _dedupe(Ids: List[str]) -> List[str]:
-        Seen = set()
+        Seen: Set[str] = set()
         Result = []
         for Item in Ids:
             if Item not in Seen:
                 Seen.add(Item)
                 Result.append(Item)
         return Result
-

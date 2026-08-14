@@ -1,233 +1,158 @@
+import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Any
+from core.config import get_llm
 
-domainKeywords: Dict[str, List[str]] = {
-    "web_frontend": ["landing page", "dashboard", "ui", "website", "frontend", "react", "vue", "css", "html", "web page", "webpage"],
-    "web_backend": ["api", "backend", "server", "rest", "graphql", "endpoint", "database", "auth", "login", "authentication"],
-    "ai_ml": ["chatbot", "llm", "machine learning", "model", "train", "embedding", "rag", "vector", "nlp", "ai assistant", "ai agent"],
-    "cli": ["cli", "command line", "command-line", "terminal tool", "script"],
-    "desktop": ["desktop app", "electron", "tkinter", "qt app"],
-    "mobile": ["mobile app", "android", "ios app", "flutter", "react native"],
-    "devops": ["docker", "dockerfile", "ci/cd", "deployment", "kubernetes", "pipeline", "container"],
-    "data_engineering": ["etl", "data pipeline", "data warehouse", "airflow"],
-    "documentation": ["readme", "documentation", "docs"],
-    "testing": ["test suite", "unit test", "unit tests", "pytest", "testing"]
+ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into concrete deliverables that need to be built.
+
+For each deliverable, provide:
+- id: a short snake_case identifier (unique within this list)
+- name: human-readable name
+- kind: a free-form label describing what this deliverable is (e.g. "api_server", "react_frontend", "dockerfile", "readme", "database_migration", "auth_module")
+- goal: one-sentence description of what this deliverable accomplishes
+- requirements: list of specific things this deliverable needs or must support
+- dependencies: list of ids of OTHER deliverables in this list that must be built before this one. Only include genuine semantic dependencies, not artificial ordering. Deliverables that are truly independent should have an empty list.
+- priority: integer 1-5 where 1=highest (build first), 5=lowest (build last). A dependency must always have a lower or equal priority number than anything that depends on it.
+
+Return ONLY a JSON object with this exact structure, no other text:
+{
+  "deliverables": [
+    {
+      "id": "...",
+      "name": "...",
+      "kind": "...",
+      "goal": "...",
+      "requirements": ["..."],
+      "dependencies": ["..."],
+      "priority": 1
+    }
+  ]
 }
 
-architectureKeywords: Dict[str, List[str]] = {
-    "microservices": ["microservice", "microservices"],
-    "monolith": ["monolith", "monolithic"],
-    "rest_api": ["rest", "restful"],
-    "graphql": ["graphql"],
-    "rag": ["rag", "retrieval augmented", "vector search"],
-    "multi_agent": ["multi-agent", "multi agent", "agents"],
-    "mcp": ["mcp", "model context protocol"],
-    "full_stack": ["full stack", "fullstack", "full-stack"]
-}
-
-stackRecoms: Dict[str, Dict[str, str]] = {
-    "web_frontend":  {"frontend_framework": "React", "styling": "TailwindCSS"},
-    "web_backend": {"backend_framework": "FastAPI", "database": "PostgreSQL"},
-    "ai_ml": {"vector_db": "ChromaDB", "embedding_model": "sentence-transformers", "llm": "Qwen (local, offline)"},
-    "cli": {"language": "Python", "cli_framework": "Typer"},
-    "desktop": {"gui_framework": "PyQt"},
-    "mobile": {"framework": "Flutter"},
-    "devops": {"containerization": "Docker", "ci_cd": "GitHub Actions"},
-    "data_engineering": {"orchestration": "Apache Airflow"},
-    "documentation": {"format": "Markdown"},
-    "testing": {"test_framework": "Pytest"}
-}
-
-requirementSchema: Dict[str, Dict[str, List[str]]] = {
-    "web_frontend": {"essential": [], "recommended": ["frontend_framework", "styling_approach"], "optional": ["responsive_design", "accessibility"]},
-    "web_backend": {"essential": ["authentication_needed"], "recommended": ["backend_framework", "database", "api_style"], "optional": ["rate_limiting", "caching"]},
-    "ai_ml": {"essential": ["data_source"], "recommended": ["vector_db", "embedding_model", "llm_choice"], "optional": ["fine_tuning", "gpu_requirements"]},
-    "cli": {"essential": [], "recommended": ["cli_framework"], "optional": ["packaging"]},
-    "desktop": {"essential": ["target_os"], "recommended": ["gui_framework"], "optional": []},
-    "mobile": {"essential": ["target_platform"], "recommended": ["framework"], "optional": []},
-    "devops": {"essential": ["target_environment"], "recommended": ["containerization", "ci_cd"], "optional": []},
-    "data_engineering": {"essential": ["data_source"], "recommended": ["orchestration_tool"], "optional": []},
-    "documentation": {"essential": [], "recommended": [], "optional": []},
-    "testing": {"essential": [], "recommended": ["test_framework"], "optional": []},
-    "_generic": {"essential": [], "recommended": ["testing_strategy", "documentation"], "optional": ["ci_cd", "containerization"]}
-}
-
-deliPatterns: Dict[str, List[str]] = {
-    "authentication_module": ["authentication module", "auth module", "authentication system"],
-    "login_page": ["login page", "login screen", "sign-in page"],
-    "landing_page": ["landing page"],
-    "dashboard": ["dashboard"],
-    "readme": ["readme"],
-    "dockerfile": ["dockerfile", "docker file"],
-    "test_suite": ["test suite", "testing suite", "unit tests"],
-    "documentation": ["documentation", "docs"],
-    "database_schema": ["database schema", "db schema"],
-    "api": ["api", "backend service"]
-}
-
-complexitySignals: Dict[str, List[str]] = {
-    "enterprise": ["enterprise", "scalable", "high availability", "distributed"],
-    "large": ["production", "microservices", "full stack", "multi-agent"],
-    "medium": ["dashboard", "authentication", "api"]
-}
-
-constraintKeywords: Dict[str, List[str]] = {
-    "must be offline / local-only": ["offline", "local only", "no internet", "no cloud"],
-    "open source only": ["open source", "open-source"],
-    "no paid services": ["free", "no paid", "no cost"]
-}
-
-clarificationTemps = {
-    "authentication_needed": "Should this include user authentication, or is it public-facing?",
-    "data_source": "What is the data source (files, database, live API, user uploads)?",
-    "target_os": "Which operating system(s) should the desktop app support?",
-    "target_platform": "Which mobile platform(s) - iOS, Android, or both?",
-    "target_environment": "What is the target deployment environment (cloud, on-prem, local)?"
-}
-
-splitPattern = re.compile(r",| and | & | as well as | also |;", flags = re.IGNORECASE)
+User request:
+"""
 
 
-def normalize(prompt: str) -> str:
-    return prompt.lower().strip()
+def _get_planner_llm():
+    return get_llm(model_name="qwen2.5:7b", temperature=0)
 
 
-def scoreDomains(prompt: str) -> Dict[str, int]:
-    text = normalize(prompt)
-    scores = {d: sum(kw in text for kw in kws) for d, kws in domainKeywords.items()}
-    scores = {d: s for d, s in scores.items() if s}
-    return dict(sorted(scores.items(), key = lambda kv: kv[1], reverse = True))
+def _parse_llm_json(text: str) -> Any:
+
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
-def inferArchitecture(prompt: str, domains: List[str]) -> List[str]:
-    text = normalize(prompt)
-    found = [name for name, kws in architectureKeywords.items() if any(kw in text for kw in kws)]
-    if not found:
-        if "web_frontend" in domains and "web_backend" in domains:
-            found.append("full_stack")
-        elif "web_backend" in domains:
-            found.append("rest_api")
-    return found
+def validateDeliverables(data: Any) -> List[Dict]:
 
+    if not isinstance(data, dict) or "deliverables" not in data:
+        return []
+    raw = data["deliverables"]
+    if not isinstance(raw, list) or not raw:
+        return []
 
-def detectDeliverables(prompt: str) -> List[Dict[str, str]]:
-    segments = [s.strip() for s in splitPattern.split(prompt) if s.strip()] or [prompt.strip()]
-    deliverables = []
-    for segment in segments:
-        segLower = segment.lower()
-        if len(segLower.split()) <= 3 and any(kw in segLower for kws in constraintKeywords.values() for kw in kws):
+    valid = []
+    for item in raw:
+        if not isinstance(item, dict):
             continue
-        matched = next((name for name, patterns in deliPatterns.items() if any(p in segLower for p in patterns)), None)
-        deliverables.append({"name": matched or segment[:60], "source_text": segment, "recognized": matched is not None})
-    return deliverables or [{"name": prompt.strip()[:60], "source_text": prompt.strip(), "recognized": False}]
+        if not all(k in item for k in ("id", "name", "kind", "goal")):
+            continue
+        valid.append({
+            "id": str(item["id"]).strip(),
+            "name": str(item["name"]).strip(),
+            "kind": str(item["kind"]).strip(),
+            "goal": str(item["goal"]).strip(),
+            "requirements": [str(r) for r in item.get("requirements", []) if r] if isinstance(item.get("requirements"), list) else [],
+            "dependencies": [str(d) for d in item.get("dependencies", []) if d] if isinstance(item.get("dependencies"), list) else [],
+            "priority": max(1, min(5, int(item.get("priority", 3)))) if isinstance(item.get("priority"), (int, float)) else 3,
+        })
+    return valid
 
 
-def complexityEstimate(prompt: str, deliverables: List[Dict]) -> str:
-    text = normalize(prompt)
-    for level in ("enterprise", "large", "medium"):
-        if any(signal in text for signal in complexitySignals[level]):
-            return level
-    if len(deliverables) >= 4:
-        return "large"
-    if len(deliverables) >= 2:
-        return "medium"
-    return "small"
+def _fallback_deliverable(userPrompt: str) -> List[Dict]:
+
+    return [{
+        "id": "deliverable_1",
+        "name": userPrompt.strip()[:60],
+        "kind": "generic",
+        "goal": userPrompt.strip(),
+        "requirements": [],
+        "dependencies": [],
+        "priority": 3,
+    }]
 
 
-def getStackRecoms(domains: List[str]) -> Dict[str, str]:
-    stack: Dict[str, str] = {}
-    for domain in domains:
-        stack.update(stackRecoms.get(domain, {}))
-    return stack
+def _call_llm_for_deliverables(userPrompt: str) -> List[Dict]:
 
+    llm = _get_planner_llm()
+    prompt_text = ANALYSIS_PROMPT + userPrompt.strip()
 
-def discoverRequirements(prompt: str, domains: List[str]) -> Dict[str, List[str]]:
-    text = normalize(prompt)
-    buckets = {"essential": set(), "recommended": set(), "optional": set()}
-    for domain in domains or ["_generic"]:
-        schema = requirementSchema.get(domain, requirementSchema["_generic"])
-        for level, items in schema.items():
-            for item in items:
-                if item.replace("_", " ") not in text:
-                    buckets[level].add(item)
-    return {level: sorted(items) for level, items in buckets.items()}
+    for attempt in range(2):
+        try:
+            response = llm.invoke(prompt_text)
+            text = response.content if hasattr(response, "content") else str(response)
+            parsed = _parse_llm_json(text)
+            deliverables = validateDeliverables(parsed)
+            if deliverables:
+                return deliverables
+        except Exception as e:
+            print(f"[PromptAgent] LLM call attempt {attempt + 1} failed: {e}")
 
-
-def genQuestions(missingEssential: List[str]) -> List[str]:
-    return [clarificationTemps.get(item, f"Could you clarify: {item.replace('_', ' ')}?") for item in missingEssential]
-
-
-def detectConstraints(prompt: str) -> List[str]:
-    text = normalize(prompt)
-    return [label for label, kws in constraintKeywords.items() if any(kw in text for kw in kws)]
-
-
-def successCriteria(deliverables: List[Dict]) -> List[str]:
-    return [f"{d['name'].replace('_', ' ').title()} is implemented, reviewed, and passes tests" for d in deliverables]
-
-
-def enhancedRequest(prompt, domains, architecture, deliverables, stack, requirements, constraints) -> str:
-    lines = [
-        f"Original request: {prompt.strip()}",
-        f"Domain(s): {', '.join(domains) if domains else 'unclassified'}",
-        f"Architecture: {', '.join(architecture) if architecture else 'not specified, infer from deliverables'}",
-        "Deliverables (build as independent tasks):",
-    ]
-    lines += [f"  {i}. {d['name'].replace('_', ' ').title()} -- \"{d['source_text']}\"" for i, d in enumerate(deliverables, 1)]
-
-    if stack:
-        lines.append("Recommended stack (override-able defaults):")
-        lines += [f"  - {k.replace('_', ' ').title()}: {v}" for k, v in stack.items()]
-
-    if requirements["recommended"] or requirements["optional"]:
-        lines.append("Assumed defaults for unspecified, non-blocking requirements:")
-        lines += [f"  - {item.replace('_', ' ').title()}: use best-practice default" for item in requirements["recommended"] + requirements["optional"]]
-
-    if constraints:
-        lines.append(f"Constraints: {', '.join(constraints)}")
-
-    return "\n".join(lines)
+    print("[PromptAgent] WARNING: LLM analysis failed, using fallback deliverable.")
+    return _fallback_deliverable(userPrompt)
 
 
 class PromptAgent:
     def process(self, userPrompt: str) -> Dict:
-        domains = list(scoreDomains(userPrompt).keys())
-        architecture = inferArchitecture(userPrompt, domains)
-        deliverables = detectDeliverables(userPrompt)
-        complexity = complexityEstimate(userPrompt, deliverables)
-        stack = getStackRecoms(domains)
-        requirements = discoverRequirements(userPrompt, domains)
-        clarificationQuestions = genQuestions(requirements["essential"])
-        constraints = detectConstraints(userPrompt)
-        successCriteriaResult = successCriteria(deliverables)
-        enhancedRequestText = enhancedRequest(userPrompt, domains, architecture, deliverables, stack, requirements, constraints)
+        deliverables = _call_llm_for_deliverables(userPrompt)
 
-        if clarificationQuestions:
-            plannerNotes = (f"{len(deliverables)} independent deliverable(s) detected; create one root task per deliverable in the DAG. "
-                             f"{len(clarificationQuestions)} essential gap(s) require user input before planning can proceed with full confidence.")
+        names = [d["name"] for d in deliverables]
+        intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"
+
+        projectType = deliverables[0]["kind"] if deliverables else "unclassified"
+
+        count = len(deliverables)
+        if count >= 5:
+            complexity = "enterprise"
+        elif count >= 3:
+            complexity = "large"
+        elif count >= 2:
+            complexity = "medium"
         else:
-            plannerNotes = f"{len(deliverables)} independent deliverable(s) detected; no essential gaps found, planning can proceed with the assumed defaults above."
+            complexity = "small"
+
+        plannerNotes = f"{count} deliverable(s) identified by LLM analysis; planning can proceed."
 
         return {
-            "intent": self.summary(deliverables),
-            "project_type": domains[0] if domains else "unclassified",
-            "projectType": domains[0] if domains else "unclassified",
+            "intent": intent,
+            "project_type": projectType,
+            "projectType": projectType,
             "complexity": complexity,
-            "architecture": architecture,
-            "domain": domains,
+            "architecture": [],
+            "domain": [projectType],
             "deliverables": deliverables,
-            "recommended_stack": stack,
-            "recommendedStack": stack,
-            "requirements": requirements,
-            "missing_information": requirements["essential"],
-            "missingInformation": requirements["essential"],
-            "clarification_questions": clarificationQuestions,
-            "clarificationQuestions": clarificationQuestions,
-            "constraints": constraints,
-            "success_criteria": successCriteriaResult,
-            "successCriteria": successCriteriaResult,
-            "enhanced_request": enhancedRequestText,
-            "enhancedRequest": enhancedRequestText,
+            "recommended_stack": {},
+            "recommendedStack": {},
+            "requirements": {"essential": [], "recommended": [], "optional": []},
+            "missing_information": [],
+            "missingInformation": [],
+            "clarification_questions": [],
+            "clarificationQuestions": [],
+            "constraints": [],
+            "success_criteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverables],
+            "successCriteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverables],
+            "enhanced_request": userPrompt.strip(),
+            "enhancedRequest": userPrompt.strip(),
             "planner_notes": plannerNotes,
             "plannerNotes": plannerNotes,
         }
@@ -236,13 +161,12 @@ class PromptAgent:
 
     @staticmethod
     def summary(deliverables: List[Dict]) -> str:
-        names = [d["name"].replace("_", " ") for d in deliverables]
+        names = [d.get("name", str(d)).replace("_", " ") for d in deliverables]
         return f"Deliver: {', '.join(names)}" if names else "Unclear request"
 
 
 if __name__ == "__main__":
-    import json
+    import json as _json
     agent = PromptAgent()
     example = "Create a README, Dockerfile, and a login page with authentication, offline only"
-    print(json.dumps(agent.process(example), indent = 2))
-
+    print(_json.dumps(agent.process(example), indent = 2))
