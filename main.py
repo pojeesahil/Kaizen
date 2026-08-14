@@ -33,6 +33,10 @@ def extractText(content) -> str:
     return str(content)
 
 def sanitizeCommand(cmd: str) -> str:
+    # Strip any duplicated work/ or work\ prefix since execution cwd is ALREADY the work directory
+    cmd = re.sub(r'(?<=\s)work[/\\]', '', cmd)
+    cmd = re.sub(r'^work[/\\]', '', cmd)
+
     if cmd.strip().startswith("pytest ") or "&& pytest " in cmd or "; pytest " in cmd:
         cmd = re.sub(r'(^|\b&&?\s*)pytest\b', r'\1python -m pytest', cmd)
 
@@ -51,6 +55,24 @@ def sanitizeCommand(cmd: str) -> str:
         return " && ".join(cleanedParts) if cleanedParts else "echo Standard library module available by default"
     return cmd
 
+def _checkNoopEdit(tname, targs):
+    """Detect if an editFile call would produce identical content (a no-op)."""
+    if tname != "editFile":
+        return False
+    path = targs.get("path", "")
+    newContent = targs.get("newContent", "")
+    from core.tools import resolvePath
+    filePath = resolvePath(path)
+    if filePath.exists():
+        try:
+            with open(filePath, "r", encoding="utf-8") as f:
+                existing = f.read()
+            if existing.strip() == newContent.strip():
+                return True
+        except Exception:
+            pass
+    return False
+
 def executeToolCalls(response, tools_list):
     toolMap = {t.name: t for t in tools_list}
     executed = []
@@ -62,6 +84,9 @@ def executeToolCalls(response, tools_list):
                 try:
                     if tname == "executeCommand" and "command" in targs:
                         targs["command"] = sanitizeCommand(targs["command"])
+                    if _checkNoopEdit(tname, targs):
+                        executed.append(f"Tool {tname} WARNING: No-op edit detected for {targs.get('path', '?')} — file content is identical. You must make meaningful changes or skip this file.")
+                        continue
                     res = toolMap[tname].invoke(targs)
                     executed.append(f"Tool {tname} executed: {res}")
                 except Exception as err:
@@ -82,6 +107,10 @@ def executeToolCalls(response, tools_list):
                     try:
                         if tname == "executeCommand" and "command" in targs:
                             targs["command"] = sanitizeCommand(targs["command"])
+                        if _checkNoopEdit(tname, targs):
+                            executed.append(f"Tool {tname} WARNING: No-op edit detected for {targs.get('path', '?')} — file content is identical. You must make meaningful changes or skip this file.")
+                            idx = start + max(end_offset, 1)
+                            continue
                         res = toolMap[tname].invoke(targs)
                         executed.append(f"Tool {tname} executed: {res}")
                     except Exception as err:
@@ -139,7 +168,12 @@ def coderNode(state: AgentState) -> dict:
         "- Check Workspace Context first. If application code files ALREADY exist in workspace, do NOT overwrite or recreate them from scratch using createFile. Use editFile to apply specific modifications to fix feedback reported by QA.\n"
         "- For frontend tasks: use JavaScript fetch() or XMLHttpRequest to call backend API endpoints. Do NOT use <script src='/api/...'> tags. Display fetched data dynamically in the DOM.\n"
         "- For backend tasks: enable CORS (Access-Control-Allow-Origin header or flask-cors) so the frontend can call API endpoints.\n"
-        "- For integration tasks: Connect files using editFile — e.g. for backend files, import modules, initialize DB/services, and call functions between them; for backend and frontend, serve HTML/static routes and enable CORS/API routes. Ensure all components work as a unified application.\n\n"
+        "- For integration tasks: You MUST make REAL changes to connect all components into a single runnable application. Specifically:\n"
+        "  1. The backend MUST serve the frontend HTML file (e.g. for Flask: add a route like @app.route('/') that returns send_file('index.html') or render_template).\n"
+        "  2. Add CORS headers or flask-cors if the frontend makes API calls.\n"
+        "  3. Ensure ALL imports between modules are correct and all function calls match their definitions.\n"
+        "  4. The entire app must be runnable from a single entry point (e.g. python app.py).\n"
+        "  5. Do NOT rewrite files with identical content — every editFile call must make a meaningful change. If no changes are needed for a file, skip it.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
         f"Prerequisite Tasks Context:\n{state['taskContext'] if state['taskContext'] else 'None'}\n\n"
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
@@ -211,10 +245,21 @@ def testerNode(state: AgentState) -> dict:
     # for tr in genTools:
     #     print(f"{tr}\n")
         
+def testerNode(state: AgentState) -> dict:
+    print(f"\nTester iteration {state['iteration']}")
+    
+    from core.tools import WORK_DIR
+    files_in_work = []
+    if WORK_DIR.exists():
+        files_in_work = [f.name for f in WORK_DIR.glob("*") if f.is_file()]
+    files_str = ", ".join(files_in_work) if files_in_work else "None"
+        
     runPretext = (
         "You are responsible for verifying code execution.\n"
         "CRITICAL RULES:\n"
         "- Output executeCommand tool calls to install required imports and run the main application file.\n"
+        "- The terminal execution directory (CWD) is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'. Run files directly (e.g. 'python app.py' or 'node server.js').\n"
+        f"- Files currently in workspace: {files_str}\n"
         "- Execution MUST be non-interactive. Do NOT run commands that wait for interactive stdin input.\n"
         "- If execution completes with Exit Code: 0 and no errors, respond strictly with 'PASS'.\n"
         "- If execution crashes, times out, or throws errors, respond strictly with 'FAIL' followed by error details."
@@ -223,7 +268,7 @@ def testerNode(state: AgentState) -> dict:
     runMessages = [
         SystemMessage(content=runPretext),
         *state["messages"],
-        HumanMessage(content="Install all required dependencies/imports and execute the main file in non-interactive mode now (e.g. work/main.py, work/main.cpp, main.py).")
+        HumanMessage(content=f"Workspace files: [{files_str}]. Install all required dependencies/imports and execute the main entrypoint file directly without 'work/' prefix now.")
     ]
     
     testerResponse = None
