@@ -109,38 +109,13 @@ class Scheduler:
             success, feedback = await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
 
             if not success:
-                AffectedFiles = self.extractAffectedFiles(allCoderResults, feedback)
-                if len(AffectedFiles) > 1:
-                    print(f"\n[QA Failure] Spawning {len(AffectedFiles)} file-specific repair agents:")
-                    for PathStr in AffectedFiles:
-                        print(f" - Target file: {PathStr}")
-
-                    for PathStr in AffectedFiles:
-                        CleanName = PathStr.replace(".", "_").replace("/", "_").replace("\\", "_")
-                        TaskId = f"fix_{CleanName}_{len(self.dag.tasks)}"
-                        NewTask = TaskNode(
-                            id=TaskId,
-                            deliverableId="repair",
-                            objective=f"Fix issues in file: {PathStr}",
-                            output=f"Repaired {PathStr}",
-                            completionCriteria=f"Passes QA verification for {PathStr}",
-                            priority=1
-                        )
-                        setattr(NewTask, "name", f"Fix {PathStr}")
-                        setattr(NewTask, "agent", "Coding")
-                        self.dag.addTask(NewTask)
-
-                        TaskFb = f"Target File: {PathStr}\nQA Feedback:\n{feedback}"
-                        self.taskFeedbacks[TaskId] = TaskFb
-
+                print(f"\n[QA Failure] Retrying all {len(completedTasks)} task(s) with combined feedback")
+                for task in completedTasks:
+                    tname = getattr(task, "name", getattr(task, "objective", task.id))
+                    print(f" - Retrying: {tname}")
+                    task.status = "pending"
+                    self.taskFeedbacks[task.id] = feedback
+                self.loadReadyTasks()
+                if self.queue:
                     await self.run()
-                else:
-                    for task in completedTasks:
-                        tname = getattr(task, "name", getattr(task, "objective", task.id))
-                        print(f"[FAILED] {tname}")
-                        task.status = "pending"
-                        self.taskFeedbacks[task.id] = feedback
-                    self.loadReadyTasks()
-                    if self.queue:
-                        await self.run()
 
