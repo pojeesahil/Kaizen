@@ -105,3 +105,23 @@ class HITLReview:
 
             else:
                 print("Invalid option. Please enter 1, 2, 3, or 4.")
+
+def final_review():
+    print("\n--- Final Review ---")
+    print("Code is written and tested.")
+    print("  [a] Accept")
+    print("  [r] Reject")
+
+    while True:
+        choice = input("\nEnter choice (a/r): ").strip().lower()
+
+        if choice == "a":
+            print("\nAccepted! Work is complete.\n")
+            return "accept"
+
+        elif choice == "r":
+            print("\nRejected. Re-running coder...\n")
+            return "reject"
+
+        else:
+            print("Enter 'a' to accept or 'r' to reject.")

@@ -118,3 +118,15 @@ class Scheduler:
                 if self.queue:
                     await self.run()
 
+            else:
+                from agents.hitl import final_review
+                action = await asyncio.to_thread(final_review)
+
+                if action == "reject":
+                    print(f"\nRe-running {len(completedTasks)} task(s)...")
+                    for task in completedTasks:
+                        task.status = "pending"
+                        self.taskFeedbacks[task.id] = "User rejected the previous code. Please regenerate and improve the implementation."
+                    self.loadReadyTasks()
+                    if self.queue:
+                        await self.run()
