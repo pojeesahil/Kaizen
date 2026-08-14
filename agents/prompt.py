@@ -34,7 +34,7 @@ User request:
 
 
 def getPlannerLLM():
-    return get_llm(model_name="qwen2.5:7b", temperature = 0)
+    return get_llm(model_name="qwen2.5-coder:7b", temperature = 0)
 
 
 def parseLLMjson(text: str) -> Any:
