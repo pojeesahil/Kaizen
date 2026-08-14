@@ -16,6 +16,7 @@ from agents.prompt import PromptAgent
 from agents.planneragent import PlannerAgent
 from agents.dag import DAG
 from agents.scheduler import Scheduler
+from agents.hitl import HITLReview
 
 def extractText(content) -> str:
     if isinstance(content, str):
@@ -410,6 +411,9 @@ if __name__ == "__main__":
             
             plannerAgent = PlannerAgent()
             dagPlan = plannerAgent.plan(promptOutput)
+
+            # HITL gate: let the user approve or edit tasks before execution
+            dagPlan = HITLReview(dagPlan).run()
             
             dag = DAG()
             for t in dagPlan.taskNodes:
