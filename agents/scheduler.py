@@ -3,9 +3,7 @@ import heapq
 
 from agents.dag import DAG
 import os
-from main import runBatchEval 
 from rag.rag import indexWorkspace
-from main import runCoder
 class Scheduler:
 
     def __init__(self, dag: DAG, goal: str = ""):
@@ -39,10 +37,10 @@ class Scheduler:
 
         instruction = f"Overall Goal: {self.goal}\nTask: {tname}" if self.goal else tname
         feedback = self.taskFeedbacks.get(task.id, "")
+        from main import runCoder
         return runCoder(instruction, taskContext=dependencyContext, feedback=feedback)
 
     def _readWorkspaceFiles(self) -> str:
-        """Read all source files from the work directory and return their contents."""
         
         workDir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
         if not os.path.exists(workDir):
@@ -106,6 +104,7 @@ class Scheduler:
 
         if completedTasks:
            
+            from main import runBatchEval
             success, feedback = await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
 
             if not success:

@@ -1,7 +1,7 @@
 import json
 import re
 from typing import List, Optional
-from models import Deliverable, TaskNode, DeliverablePlan, newId
+from agents.models import Deliverable, TaskNode, DeliverablePlan, newId
 from core.config import get_llm
 
 TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a small, ordered list of concrete implementation tasks.

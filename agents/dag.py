@@ -1,5 +1,5 @@
 from collections import defaultdict, deque
-from models import TaskNode
+from agents.models import TaskNode
 
 
 class DAG:

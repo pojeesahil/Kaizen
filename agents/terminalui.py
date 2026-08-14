@@ -1,8 +1,8 @@
 import sys
 import time
 from typing import Dict, Any, Optional
-from planneragent import PlannerAgent
-from models import PlanningEvent, DAGPlan
+from agents.planneragent import PlannerAgent
+from agents.models import PlanningEvent, DAGPlan
 
 Reset = "\033[0m"
 Dim = "\033[2m"

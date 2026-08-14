@@ -1,5 +1,5 @@
 from typing import List, Dict
-from models import Deliverable, DeliverablePlan, TaskNode, DAGPlan
+from agents.models import Deliverable, DeliverablePlan, TaskNode, DAGPlan
 
 
 class DAGMerger:
