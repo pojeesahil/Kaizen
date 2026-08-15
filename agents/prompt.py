@@ -3,17 +3,18 @@ import re
 from typing import Dict, List, Any
 from core.config import get_llm
 
-ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into concrete, coarse-grained deliverables that need to be built.
+ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into a minimal set of coarse-grained, modular deliverables (typically 2 to 4 deliverables total).
 
 CRITICAL RULES:
-- Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly asked for.
-- Group related features by module or file (e.g. 3-6 cohesive deliverables total) rather than fragmented micro-actions.
-- Keep deliverables practical, cohesive, and directly aligned with the user request.
+- Group all related functions, state, and logic into cohesive, file-level deliverables (e.g. "Game Engine / Logic", "Interactive UI / Main Loop", "Documentation").
+- NEVER create fragmented micro-deliverables (e.g. do NOT create separate deliverables for score, collision, movement, etc. — combine them into the core logic deliverable).
+- Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly requested.
+- For games, terminal apps, or CLI tools, specify a concrete, runnable framework (e.g. curses, turtle, tkinter, pygame, or rich).
 
 For each deliverable, provide:
-- id: a short identifier (e.g. "coreLogic", "apiServer", "frontendUi")
+- id: a short identifier (e.g. "coreLogic", "gameUi", "readme")
 - name: human-readable name
-- kind: a concise label (e.g. "core_logic", "api_server", "ui", "readme")
+- kind: a concise label (e.g. "core_logic", "ui", "readme")
 - goal: one-sentence description of what this deliverable accomplishes
 - requirements: list of specific things this deliverable needs or must support
 - dependencies: list of ids of OTHER deliverables in this list that must be built before this one.

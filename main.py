@@ -186,11 +186,15 @@ def coderNode(state: AgentState) -> dict:
         "7. To edit an entire file, use 'editFile' (existing imports are preserved automatically).\n\n"
         "Tool Call Format Examples:\n"
         '{"name": "addImport", "arguments": {"path": "app.py", "module": "services.user", "name": "UserService"}}\n'
-        '{"name": "upsertFunction", "arguments": {"path": "math_ops.py", "functionCode": "def add(a: float, b: float) -> float:\\n    return a + b"}}\n'
+        '{"name": "upsertFunction", "arguments": {"path": "mathOps.py", "functionCode": "def add(a: float, b: float) -> float:\\n    return a + b"}}\n'
         '{"name": "upsertClass", "arguments": {"path": "models.py", "classCode": "class User:\\n    def __init__(self, name):\\n        self.name = name"}}\n'
-        '{"name": "createFile", "arguments": {"path": "main.py", "content": "import sys\\n\\ndef main():\\n    pass\\n\\nif __name__ == \'__main__\':\\n    main()"}}\n\n'
+        '{"name": "createFile", "arguments": {"path": "game.py", "content": "def initGame():\\n    return {\\"score\\": 0}\\n"}}\n\n'
         "Code Guidelines:\n"
-        "- Write clean, concise, production code.\n"
+        "- NAMING: Use strict camelCase for all function names, method names, and variable names (e.g. gameBoard, snakeHead, moveSnake, checkCollision). Do NOT use snake_case.\n"
+        "- NO COMMENTS: Do NOT include comments or docstrings in generated code.\n"
+        "- NO AI-LOOKING CODE: Write clean, compact, production-ready code with concrete logic. Never generate empty stubs or 'pass' placeholders.\n"
+        "- IMPORTS: All imports must be placed strictly at the very top of the file.\n"
+        "- GAMES / INTERACTIVE APPS: Implement complete, functional logic with working loops and event handling (e.g. using standard library curses, turtle, tkinter, or pygame).\n"
         "- Connect all modules using the exact import strings shown in Prerequisite Context.\n"
         "- When writing entrypoints, place 'if __name__ == \"__main__\": main()' at the very bottom of the file.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
