@@ -34,7 +34,7 @@ Return ONLY a JSON object with this exact structure, no other text:
 def getPlannerLLM():
     return get_llm(model_name="qwen2.5:latest", temperature=0)
 
-def parseLlmJson(text: str) -> Any:
+def parseLLMjson(text: str) -> Any:
     text = text.strip()
     try:
         return json.loads(text)
@@ -47,6 +47,8 @@ def parseLlmJson(text: str) -> Any:
         except json.JSONDecodeError:
             pass
     return None
+
+parseLlmJson = parseLLMjson
 
 def validateTasks(data) -> List[dict]:
     if not isinstance(data, dict) or "tasks" not in data:

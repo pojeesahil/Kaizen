@@ -109,11 +109,11 @@ def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
 
 class PromptAgent:
     def process(self, userPrompt: str) -> Dict:
-        deliverables = callLLMforDeliverables(userPrompt)
-        names = [d["name"] for d in deliverables]
+        deliverablesList = callLLMforDeliverables(userPrompt)
+        names = [d["name"] for d in deliverablesList]
         intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"
-        projectType = deliverables[0]["kind"] if deliverables else "unclassified"
-        count = len(deliverables)
+        projectType = deliverablesList[0]["kind"] if deliverablesList else "unclassified"
+        count = len(deliverablesList)
 
         if count >= 5:
             complexity = "enterprise"
