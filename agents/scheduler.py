@@ -1,9 +1,11 @@
-import asyncio
-import heapq
-
-from agents.dag import DAG
 import os
+import heapq
+import asyncio
+from pathlib import Path
+from agents.dag import DAG
 from rag.rag import indexWorkspace
+from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
+
 class Scheduler:
 
     def __init__(self, dag: DAG, goal: str = ""):
@@ -12,6 +14,7 @@ class Scheduler:
         self.queue: list[tuple[int, str]] = []
         self.taskOutputs: dict[str, str] = {}
         self.taskFeedbacks: dict[str, str] = {}
+        self.workDir = Path(__file__).resolve().parent.parent / "work"
 
     def loadReadyTasks(self) -> None:
         for task in self.dag.getReadyTasks():
@@ -23,44 +26,56 @@ class Scheduler:
     def executeCoder(self, task) -> dict:
         tname = getattr(task, "name", getattr(task, "objective", task.id))
         print(f"\n[{getattr(task, 'agent', 'Coding')}] Starting Coder Agent for task: {tname}")
-        
 
-        dependencyContext = ""
+        depContext = ""
         for depId in getattr(task, "dependencies", []):
             if depId in self.taskOutputs:
-                dependencyContext += f"\n- Parent task '{depId}' completed: {self.taskOutputs[depId]}"
+                depContext += f"\n- Parent task '{depId}' output: {self.taskOutputs[depId]}"
 
-       
-        workFiles = self._readWorkspaceFiles()
+        manifestContext = formatManifestContext(self.workDir)
+        if manifestContext:
+            depContext += f"\n\n{manifestContext}"
+
+        workFiles = self.readWorkspaceFiles()
         if workFiles:
-            dependencyContext += "\n\nCurrent workspace file contents:\n" + workFiles
+            depContext += "\n\nCurrent workspace file contents:\n" + workFiles
 
         instruction = f"Overall Goal: {self.goal}\nTask: {tname}" if self.goal else tname
         feedback = self.taskFeedbacks.get(task.id, "")
         from main import runCoder
-        return runCoder(instruction, taskContext=dependencyContext, feedback=feedback)
 
-    def _readWorkspaceFiles(self) -> str:
-        
-        workDir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
-        if not os.path.exists(workDir):
+        result = runCoder(instruction, taskContext=depContext, feedback=feedback)
+        autoFixImports(self.workDir)
+
+        isValid, errors = validateConnectedness(self.workDir)
+        if not isValid:
+            errText = "\n".join(f"- {e}" for e in errors)
+            print(f"\n[Post-Task AST Import Check Failed for '{tname}']:\n{errText}")
+            repairPrompt = f"Fix the following import and syntax errors in workspace files immediately:\n{errText}"
+            result = runCoder(repairPrompt, taskContext=depContext, feedback=errText)
+            autoFixImports(self.workDir)
+
+        return result
+
+    def readWorkspaceFiles(self) -> str:
+        if not self.workDir.exists():
             return ""
 
-        SUPPORTED_EXTENSIONS = {
+        supportedExts = {
             ".py", ".js", ".ts", ".java", ".html", ".css", ".json",
             ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".yaml", ".yml"
         }
-        SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out"}
+        skipDirs = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out"}
 
         parts = []
-        for root, dirs, files in os.walk(workDir):
-            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        for root, dirs, files in os.walk(self.workDir):
+            dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
             for fname in sorted(files):
                 ext = os.path.splitext(fname)[1].lower()
-                if ext not in SUPPORTED_EXTENSIONS:
+                if ext not in supportedExts:
                     continue
                 fpath = os.path.join(root, fname)
-                relpath = os.path.relpath(fpath, workDir)
+                relpath = os.path.relpath(fpath, self.workDir)
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read()
@@ -69,9 +84,30 @@ class Scheduler:
                 except Exception:
                     continue
 
-        return "\n\n".join(parts)
+    def scaffoldWorkspace(self) -> None:
+        self.workDir.mkdir(parents=True, exist_ok=True)
+        files = [f for f in self.workDir.glob("*") if f.is_file() and not f.name.startswith(".")]
+        if not files:
+            goalLower = self.goal.lower()
+            if "snake" in goalLower:
+                entryName = "snake_game.py"
+            elif "tictactoe" in goalLower or "tic tac toe" in goalLower:
+                entryName = "tictactoe.py"
+            elif "calc" in goalLower:
+                entryName = "calculator.py"
+            elif any(w in goalLower for w in ("web", "html", "website", "react")):
+                entryName = "app.py"
+            else:
+                entryName = "main.py"
+
+            entryPath = self.workDir / entryName
+            if not entryPath.exists():
+                with open(entryPath, "w", encoding="utf-8") as f:
+                    f.write("# Main entrypoint\n\ndef main():\n    pass\n\nif __name__ == '__main__':\n    main()\n")
+                print(f"[Scaffold] Initialized primary entrypoint: {entryName}")
 
     async def run(self) -> None:
+        self.scaffoldWorkspace()
         self.loadReadyTasks()
 
         completedTasks = []
@@ -79,7 +115,6 @@ class Scheduler:
 
         while self.queue:
             batch = []
-
             while self.queue:
                 _, taskId = heapq.heappop(self.queue)
                 batch.append(self.dag.tasks[taskId])
@@ -89,24 +124,25 @@ class Scheduler:
             for task in batch:
                 result = await asyncio.to_thread(self.executeCoder, task)
                 coderResults.append(result)
+                toolResults = result.get("toolResults", [])
+                if toolResults:
+                    print(f"Task '{getattr(task, 'name', task.id)}' executed {len(toolResults)} tool(s).")
                 self.dag.markComplete(task.id)
-                self.taskOutputs[task.id] = result.get("coderMessage", "Task completed.")
+                coderMsg = result.get("coderMessage", "Task completed.")
+                if toolResults:
+                    coderMsg += "\nTool Executions: " + "; ".join(toolResults)
+                self.taskOutputs[task.id] = coderMsg
                 self.taskFeedbacks.pop(task.id, None)
 
-               
-                
                 await asyncio.to_thread(indexWorkspace)
 
             completedTasks.extend(batch)
             allCoderResults.extend(coderResults)
-
             self.loadReadyTasks()
 
         if completedTasks:
-           
             from main import runBatchEval
             success, feedback = await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
-
             if not success:
                 print(f"\n[QA Failure] Retrying all {len(completedTasks)} task(s) with combined feedback")
                 for task in completedTasks:
@@ -117,4 +153,3 @@ class Scheduler:
                 self.loadReadyTasks()
                 if self.queue:
                     await self.run()
-

@@ -3,16 +3,21 @@ import re
 from typing import Dict, List, Any
 from core.config import get_llm
 
-ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into concrete deliverables that need to be built.
+ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into concrete, coarse-grained deliverables that need to be built.
+
+CRITICAL RULES:
+- Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly asked for.
+- Group related features by module or file (e.g. 3-6 cohesive deliverables total) rather than fragmented micro-actions.
+- Keep deliverables practical, cohesive, and directly aligned with the user request.
 
 For each deliverable, provide:
-- id: a short snake_case identifier (unique within this list)
+- id: a short identifier (e.g. "coreLogic", "apiServer", "frontendUi")
 - name: human-readable name
-- kind: a free-form label describing what this deliverable is (e.g. "api_server", "react_frontend", "dockerfile", "readme", "database_migration", "auth_module")
+- kind: a concise label (e.g. "core_logic", "api_server", "ui", "readme")
 - goal: one-sentence description of what this deliverable accomplishes
 - requirements: list of specific things this deliverable needs or must support
-- dependencies: list of ids of OTHER deliverables in this list that must be built before this one. Only include genuine semantic dependencies, not artificial ordering. Deliverables that are truly independent should have an empty list.
-- priority: integer 1-5 where 1=highest (build first), 5=lowest (build last). A dependency must always have a lower or equal priority number than anything that depends on it.
+- dependencies: list of ids of OTHER deliverables in this list that must be built before this one.
+- priority: integer 1-5 where 1=highest (build first), 5=lowest (build last).
 
 Return ONLY a JSON object with this exact structure, no other text:
 {
@@ -32,13 +37,10 @@ Return ONLY a JSON object with this exact structure, no other text:
 User request:
 """
 
-
 def getPlannerLLM():
-    return get_llm(model_name="qwen2.5:7b", temperature = 0)
-
+    return get_llm(model_name="qwen2.5:latest", temperature=0)
 
 def parseLLMjson(text: str) -> Any:
-
     text = text.strip()
     try:
         return json.loads(text)
@@ -52,9 +54,7 @@ def parseLLMjson(text: str) -> Any:
             pass
     return None
 
-
 def validateDeliverables(data: Any) -> List[Dict]:
-
     if not isinstance(data, dict) or "deliverables" not in data:
         return []
     raw = data["deliverables"]
@@ -78,11 +78,9 @@ def validateDeliverables(data: Any) -> List[Dict]:
         })
     return valid
 
-
 def fallbackDeliverable(userPrompt: str) -> List[Dict]:
-
     return [{
-        "id": "deliverable_1",
+        "id": "deliverable1",
         "name": userPrompt.strip()[:60],
         "kind": "generic",
         "goal": userPrompt.strip(),
@@ -91,15 +89,13 @@ def fallbackDeliverable(userPrompt: str) -> List[Dict]:
         "priority": 3,
     }]
 
-
 def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
-
     llm = getPlannerLLM()
-    prompt_text = ANALYSIS_PROMPT + userPrompt.strip()
+    promptText = ANALYSIS_PROMPT + userPrompt.strip()
 
     for attempt in range(2):
         try:
-            response = llm.invoke(prompt_text)
+            response = llm.invoke(promptText)
             text = response.content if hasattr(response, "content") else str(response)
             parsed = parseLLMjson(text)
             deliverables = validateDeliverables(parsed)
@@ -111,17 +107,14 @@ def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
     print("[PromptAgent] WARNING: LLM analysis failed, using fallback deliverable.")
     return fallbackDeliverable(userPrompt)
 
-
 class PromptAgent:
     def process(self, userPrompt: str) -> Dict:
         deliverables = callLLMforDeliverables(userPrompt)
-
         names = [d["name"] for d in deliverables]
         intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"
-
         projectType = deliverables[0]["kind"] if deliverables else "unclassified"
-
         count = len(deliverables)
+
         if count >= 5:
             complexity = "enterprise"
         elif count >= 3:
@@ -163,10 +156,3 @@ class PromptAgent:
     def summary(deliverables: List[Dict]) -> str:
         names = [d.get("name", str(d)).replace("_", " ") for d in deliverables]
         return f"Deliver: {', '.join(names)}" if names else "Unclear request"
-
-
-if __name__ == "__main__":
-    import json as _json
-    agent = PromptAgent()
-    example = "Create a README, Dockerfile, and a login page with authentication, offline only"
-    print(_json.dumps(agent.process(example), indent = 2))
