@@ -1,10 +1,10 @@
 import json
 import re
-from typing import List, Optional
-from agents.models import Deliverable, TaskNode, DeliverablePlan, newId
+from typing import List, Optional, Any, Dict
+from agents.models import deliverable, taskNode, deliverablePlan, newId
 from core.config import get_llm
 
-TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a small, ordered list of concrete implementation tasks.
+taskDecompositionPrompt = """You are an expert software engineer. Break down the following deliverable into a small, ordered list of concrete implementation tasks.
 
 Deliverable: {name}
 Kind: {kind}
@@ -28,11 +28,11 @@ Return ONLY a JSON object with this exact structure, no other text:
 }}"""
 
 
-def getPlannerLLM():
-    return get_llm(model_name="qwen2.5-coder:7b", temperature = 0)
+def getPlannerLlm() -> Any:
+    return get_llm(model_name = "qwen2.5-coder:7b", temperature = 0)
 
 
-def parseLLMjson(text: str):
+def parseLlmJson(text: str) -> Any:
     text = text.strip()
     try:
         return json.loads(text)
@@ -47,95 +47,99 @@ def parseLLMjson(text: str):
     return None
 
 
-def validateTasks(data) -> List[dict]:
+def validateTasks(data: Any) -> List[Dict[str, Any]]:
     if not isinstance(data, dict) or "tasks" not in data:
         return []
-    raw = data["tasks"]
-    if not isinstance(raw, list) or not raw:
+    rawList = data["tasks"]
+    if not isinstance(rawList, list) or not rawList:
         return []
-    valid = []
-    for item in raw:
+    validTasks = []
+    for item in rawList:
         if not isinstance(item, dict):
             continue
         if "objective" not in item:
             continue
-        valid.append({
+        validTasks.append({
             "objective": str(item["objective"]).strip(),
             "output": str(item.get("output", "")).strip(),
             "completion_criteria": str(item.get("completion_criteria", "")).strip(),
         })
-    return valid
+    return validTasks
 
 
-def callLLMforTasks(deliverable: Deliverable) -> List[dict]:
-
-    llm = getPlannerLLM()
-    prompt_text = TASK_DECOMPOSITION_PROMPT.format(
-        name = deliverable.name,
-        kind = deliverable.kind,
-        goal = deliverable.goal,
-        requirements=", ".join(deliverable.requirements) if deliverable.requirements else "none specified",
+def callLlmForTasks(targetDeliverable: deliverable) -> List[Dict[str, Any]]:
+    llmClient = getPlannerLlm()
+    promptText = taskDecompositionPrompt.format(
+        name = targetDeliverable.name,
+        kind = targetDeliverable.kind,
+        goal = targetDeliverable.goal,
+        requirements = ", ".join(targetDeliverable.requirements) if targetDeliverable.requirements else "none specified",
     )
 
     for attempt in range(2):
         try:
-            response = llm.invoke(prompt_text)
-            text = response.content if hasattr(response, "content") else str(response)
-            parsed = parseLLMjson(text)
-            tasks = validateTasks(parsed)
-            if tasks:
-                return tasks
-        except Exception as e:
-            print(f"[DeliverablePlanner] LLM task decomposition attempt {attempt + 1} failed: {e}")
+            response = llmClient.invoke(promptText)
+            responseText = response.content if hasattr(response, "content") else str(response)
+            parsedJson = parseLlmJson(responseText)
+            validatedTasks = validateTasks(parsedJson)
+            if validatedTasks:
+                return validatedTasks
+        except Exception as err:
+            print(f"[DeliverablePlanner] LLM task decomposition attempt {attempt + 1} failed: {err}")
 
-    print(f"[DeliverablePlanner] WARNING: LLM task decomposition failed for '{deliverable.name}', using fallback.")
-    return [{"objective": f"Implement {deliverable.name}", "output": deliverable.name, "completion_criteria": f"{deliverable.name} exists, matches spec, and passes validation."}]
+    print(f"[DeliverablePlanner] WARNING: LLM task decomposition failed for '{targetDeliverable.name}', using fallback.")
+    return [{
+        "objective": f"Implement {targetDeliverable.name}",
+        "output": targetDeliverable.name,
+        "completion_criteria": f"{targetDeliverable.name} exists, matches spec, and passes validation."
+    }]
 
 
-class DeliverablePlanner:
+def attachChild(taskList: List[taskNode], parentId: str, childId: str) -> None:
+    for task in taskList:
+        if task.id == parentId:
+            task.childTasks.append(childId)
+            return
 
-    def plan(self, Deliverable: Deliverable) -> DeliverablePlan:
-        LlmTasks = callLLMforTasks(Deliverable)
-        Priority = Deliverable.priority
-        Tasks = self._buildTaskChain(Deliverable, LlmTasks, Priority)
-        return DeliverablePlan(deliverable=Deliverable, tasks=Tasks)
+
+class deliverablePlanner:
+    def plan(self, targetDeliverable: deliverable) -> deliverablePlan:
+        llmTasks = callLlmForTasks(targetDeliverable)
+        priorityVal = targetDeliverable.priority
+        taskList = self._buildTaskChain(targetDeliverable, llmTasks, priorityVal)
+        return deliverablePlan(deliverable=targetDeliverable, tasks=taskList)
 
     plan_deliverable = plan
 
-    def _buildTaskChain(self, Deliverable: Deliverable, LlmTasks: List[dict], Priority: int) -> List[TaskNode]:
+    def _buildTaskChain(self, targetDeliverable: deliverable, llmTasks: List[Dict[str, Any]], priorityVal: int) -> List[taskNode]:
+        taskList: List[taskNode] = []
+        previousId: Optional[str] = None
 
-        Tasks: List[TaskNode] = []
-        PreviousId: Optional[str] = None
-
-        for Index, LlmTask in enumerate(LlmTasks, start = 1):
-            TaskId = newId(f"{Deliverable.id}-t{Index}")
-            IsLast = Index == len(LlmTasks)
-            Task = TaskNode(
-                id = TaskId,
-                deliverableId = Deliverable.id,
-                objective = LlmTask["objective"],
-                output = LlmTask.get("output", Deliverable.name if IsLast else f"step {Index} for {Deliverable.name}"),
-                completionCriteria = LlmTask.get("completion_criteria", self._completionCriteria(LlmTask["objective"], Deliverable, IsLast)),
-                parentTask = PreviousId,
-                dependencies = [PreviousId] if PreviousId else [],
-                priority = Priority
+        for indexVal, llmTask in enumerate(llmTasks, start=1):
+            taskId = newId(f"{targetDeliverable.id}-t{indexVal}")
+            isLast = (indexVal == len(llmTasks))
+            task = taskNode(
+                id = taskId,
+                deliverableId = targetDeliverable.id,
+                objective = llmTask["objective"],
+                output = llmTask.get("output", targetDeliverable.name if isLast else f"step {indexVal} for {targetDeliverable.name}"),
+                completionCriteria = llmTask.get("completion_criteria", self._completionCriteria(llmTask["objective"], targetDeliverable, isLast)),
+                parentTask = previousId,
+                dependencies = [previousId] if previousId else [],
+                priority = priorityVal,
             )
-            if PreviousId:
-                _attachChild(Tasks, PreviousId, TaskId)
-            Tasks.append(Task)
-            PreviousId = TaskId
+            if previousId:
+                attachChild(taskList, previousId, taskId)
+            taskList.append(task)
+            previousId = taskId
 
-        return Tasks
+        return taskList
 
     @staticmethod
-    def _completionCriteria(Step: str, Deliverable: Deliverable, IsLast: bool) -> str:
-        if IsLast:
-            return f"{Deliverable.name} exists, matches spec, and passes validation."
-        return f"'{Step}' complete for {Deliverable.name}."
+    def _completionCriteria(stepText: str, targetDeliverable: deliverable, isLast: bool) -> str:
+        if isLast:
+            return f"{targetDeliverable.name} exists, matches spec, and passes validation."
+        return f"'{stepText}' complete for {targetDeliverable.name}."
 
 
-def _attachChild(Tasks: List[TaskNode], ParentId: str, ChildId: str) -> None:
-    for Task in Tasks:
-        if Task.id == ParentId:
-            Task.childTasks.append(ChildId)
-            return
+DeliverablePlanner = deliverablePlanner

@@ -1,90 +1,82 @@
 from typing import List, Dict, Set
-from agents.models import Deliverable
+from agents.models import deliverable
 
 
-class DependencyResolver:
+class dependencyResolver:
+    def resolve(self, deliverablesList: List[deliverable]) -> List[deliverable]:
+        idSet = {d.id for d in deliverablesList}
 
-    def resolve(self, Deliverables: List[Deliverable]) -> List[Deliverable]:
-        IdSet = {d.id for d in Deliverables}
+        llmIdToActualMap: Dict[str, str] = {}
+        for d in deliverablesList:
+            parts = d.id.rsplit("-", 1)
+            if len(parts) == 2:
+                llmIdToActualMap[parts[0]] = d.id
+            llmIdToActualMap[d.id] = d.id
 
-        LlmIdToActual: Dict[str, str] = {}
-        for d in Deliverables:
+        for d in deliverablesList:
+            remappedDeps = []
+            for depId in d.dependencies:
+                actualId = llmIdToActualMap.get(depId)
+                if actualId:
+                    remappedDeps.append(actualId)
 
-            Parts = d.id.rsplit("-", 1)
-            if len(Parts) == 2:
-                LlmIdToActual[Parts[0]] = d.id
-            LlmIdToActual[d.id] = d.id
-
-        for d in Deliverables:
-
-            Remapped = []
-            for DepId in d.dependencies:
-                ActualId = LlmIdToActual.get(DepId)
-                if ActualId:
-                    Remapped.append(ActualId)
-
-            d.dependencies = Remapped
-
-            d.dependencies = self.dedupe(d.dependencies)
-
+            d.dependencies = self.dedupe(remappedDeps)
             d.dependencies = [dep for dep in d.dependencies if dep != d.id]
+            d.dependencies = [dep for dep in d.dependencies if dep in idSet]
 
-            d.dependencies = [dep for dep in d.dependencies if dep in IdSet]
+        self.breakCycles(deliverablesList)
+        self.alignPriorities(deliverablesList)
+        return deliverablesList
 
-        self.breakCycles(Deliverables)
+    def breakCycles(self, deliverablesList: List[deliverable]) -> None:
+        graphMap: Dict[str, List[str]] = {d.id: list(d.dependencies) for d in deliverablesList}
+        whiteState, greyState, blackState = 0, 1, 2
+        colorMap: Dict[str, int] = {d.id: whiteState for d in deliverablesList}
+        backEdges: List[tuple] = []
 
-        self.alignPriorities(Deliverables)
-
-        return Deliverables
-
-    def breakCycles(self, Deliverables: List[Deliverable]) -> None:
-
-        Graph: Dict[str, List[str]] = {d.id: list(d.dependencies) for d in Deliverables}
-        White, Grey, Black = 0, 1, 2
-        Color: Dict[str, int] = {d.id: White for d in Deliverables}
-        BackEdges: List[tuple] = []
-
-        def Dfs(Node: str) -> None:
-            Color[Node] = Grey
-            for Neighbor in Graph.get(Node, []):
-                if Neighbor not in Color:
+        def dfsTraversal(nodeId: str) -> None:
+            colorMap[nodeId] = greyState
+            for neighborId in graphMap.get(nodeId, []):
+                if neighborId not in colorMap:
                     continue
-                if Color[Neighbor] == Grey:
-                    BackEdges.append((Node, Neighbor))
-                elif Color[Neighbor] == White:
-                    Dfs(Neighbor)
-            Color[Node] = Black
+                if colorMap[neighborId] == greyState:
+                    backEdges.append((nodeId, neighborId))
+                elif colorMap[neighborId] == whiteState:
+                    dfsTraversal(neighborId)
+            colorMap[nodeId] = blackState
 
-        for d in Deliverables:
-            if Color[d.id] == White:
-                Dfs(d.id)
+        for d in deliverablesList:
+            if colorMap[d.id] == whiteState:
+                dfsTraversal(d.id)
 
-        if BackEdges:
-            ById = {d.id: d for d in Deliverables}
-            for Source, Target in BackEdges:
-                if Source in ById and Target in ById[Source].dependencies:
-                    ById[Source].dependencies.remove(Target)
-                    print(f"[DependencyResolver] Broke cycle: removed {Source} -> {Target}")
+        if backEdges:
+            byId = {d.id: d for d in deliverablesList}
+            for sourceId, targetId in backEdges:
+                if sourceId in byId and targetId in byId[sourceId].dependencies:
+                    byId[sourceId].dependencies.remove(targetId)
+                    print(f"[DependencyResolver] Broke cycle: removed {sourceId} -> {targetId}")
 
-    def alignPriorities(self, Deliverables: List[Deliverable]) -> None:
-
-        ById = {d.id: d for d in Deliverables}
-        Changed = True
-        while Changed:
-            Changed = False
-            for d in Deliverables:
-                for DepId in d.dependencies:
-                    Dep = ById.get(DepId)
-                    if Dep and Dep.priority > d.priority:
-                        Dep.priority = d.priority
-                        Changed = True
+    def alignPriorities(self, deliverablesList: List[deliverable]) -> None:
+        byId = {d.id: d for d in deliverablesList}
+        hasChanged = True
+        while hasChanged:
+            hasChanged = False
+            for d in deliverablesList:
+                for depId in d.dependencies:
+                    depItem = byId.get(depId)
+                    if depItem and depItem.priority > d.priority:
+                        depItem.priority = d.priority
+                        hasChanged = True
 
     @staticmethod
-    def dedupe(Ids: List[str]) -> List[str]:
-        Seen: Set[str] = set()
-        Result = []
-        for Item in Ids:
-            if Item not in Seen:
-                Seen.add(Item)
-                Result.append(Item)
-        return Result
+    def dedupe(idsList: List[str]) -> List[str]:
+        seenSet: Set[str] = set()
+        resultList = []
+        for item in idsList:
+            if item not in seenSet:
+                seenSet.add(item)
+                resultList.append(item)
+        return resultList
+
+
+DependencyResolver = dependencyResolver

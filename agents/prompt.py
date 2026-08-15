@@ -3,7 +3,7 @@ import re
 from typing import Dict, List, Any
 from core.config import get_llm
 
-ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into concrete deliverables that need to be built.
+analysisPrompt = """You are an expert software architect. Analyze the following user request and break it down into concrete deliverables that need to be built.
 
 For each deliverable, provide:
 - id: a short snake_case identifier (unique within this list)
@@ -33,12 +33,11 @@ User request:
 """
 
 
-def getPlannerLLM():
-    return get_llm(model_name="qwen2.5-coder:7b", temperature = 0)
+def getPlannerLlm() -> Any:
+    return get_llm(model_name = "qwen2.5-coder:7b", temperature = 0)
 
 
-def parseLLMjson(text: str) -> Any:
-
+def parseLlmJson(text: str) -> Any:
     text = text.strip()
     try:
         return json.loads(text)
@@ -53,21 +52,20 @@ def parseLLMjson(text: str) -> Any:
     return None
 
 
-def validateDeliverables(data: Any) -> List[Dict]:
-
+def validateDeliverables(data: Any) -> List[Dict[str, Any]]:
     if not isinstance(data, dict) or "deliverables" not in data:
         return []
-    raw = data["deliverables"]
-    if not isinstance(raw, list) or not raw:
+    rawList = data["deliverables"]
+    if not isinstance(rawList, list) or not rawList:
         return []
 
-    valid = []
-    for item in raw:
+    validDeliverables = []
+    for item in rawList:
         if not isinstance(item, dict):
             continue
         if not all(k in item for k in ("id", "name", "kind", "goal")):
             continue
-        valid.append({
+        validDeliverables.append({
             "id": str(item["id"]).strip(),
             "name": str(item["name"]).strip(),
             "kind": str(item["kind"]).strip(),
@@ -76,11 +74,10 @@ def validateDeliverables(data: Any) -> List[Dict]:
             "dependencies": [str(d) for d in item.get("dependencies", []) if d] if isinstance(item.get("dependencies"), list) else [],
             "priority": max(1, min(5, int(item.get("priority", 3)))) if isinstance(item.get("priority"), (int, float)) else 3,
         })
-    return valid
+    return validDeliverables
 
 
-def fallbackDeliverable(userPrompt: str) -> List[Dict]:
-
+def fallbackDeliverable(userPrompt: str) -> List[Dict[str, Any]]:
     return [{
         "id": "deliverable_1",
         "name": userPrompt.strip()[:60],
@@ -92,36 +89,34 @@ def fallbackDeliverable(userPrompt: str) -> List[Dict]:
     }]
 
 
-def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
-
-    llm = getPlannerLLM()
-    prompt_text = ANALYSIS_PROMPT + userPrompt.strip()
+def callLlmForDeliverables(userPrompt: str) -> List[Dict[str, Any]]:
+    llmClient = getPlannerLlm()
+    fullPromptText = analysisPrompt + userPrompt.strip()
 
     for attempt in range(2):
         try:
-            response = llm.invoke(prompt_text)
-            text = response.content if hasattr(response, "content") else str(response)
-            parsed = parseLLMjson(text)
-            deliverables = validateDeliverables(parsed)
-            if deliverables:
-                return deliverables
-        except Exception as e:
-            print(f"[PromptAgent] LLM call attempt {attempt + 1} failed: {e}")
+            response = llmClient.invoke(fullPromptText)
+            responseText = response.content if hasattr(response, "content") else str(response)
+            parsedJson = parseLlmJson(responseText)
+            validatedDeliverables = validateDeliverables(parsedJson)
+            if validatedDeliverables:
+                return validatedDeliverables
+        except Exception as err:
+            print(f"[PromptAgent] LLM call attempt {attempt + 1} failed: {err}")
 
     print("[PromptAgent] WARNING: LLM analysis failed, using fallback deliverable.")
     return fallbackDeliverable(userPrompt)
 
 
-class PromptAgent:
-    def process(self, userPrompt: str) -> Dict:
-        deliverables = callLLMforDeliverables(userPrompt)
+class promptAgent:
+    def process(self, userPrompt: str) -> Dict[str, Any]:
+        deliverablesList = callLlmForDeliverables(userPrompt)
 
-        names = [d["name"] for d in deliverables]
+        names = [d["name"] for d in deliverablesList]
         intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"
+        projectType = deliverablesList[0]["kind"] if deliverablesList else "unclassified"
 
-        projectType = deliverables[0]["kind"] if deliverables else "unclassified"
-
-        count = len(deliverables)
+        count = len(deliverablesList)
         if count >= 5:
             complexity = "enterprise"
         elif count >= 3:
@@ -140,7 +135,7 @@ class PromptAgent:
             "complexity": complexity,
             "architecture": [],
             "domain": [projectType],
-            "deliverables": deliverables,
+            "deliverables": deliverablesList,
             "recommended_stack": {},
             "recommendedStack": {},
             "requirements": {"essential": [], "recommended": [], "optional": []},
@@ -149,8 +144,8 @@ class PromptAgent:
             "clarification_questions": [],
             "clarificationQuestions": [],
             "constraints": [],
-            "success_criteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverables],
-            "successCriteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverables],
+            "success_criteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverablesList],
+            "successCriteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverablesList],
             "enhanced_request": userPrompt.strip(),
             "enhancedRequest": userPrompt.strip(),
             "planner_notes": plannerNotes,
@@ -160,13 +155,15 @@ class PromptAgent:
     run = process
 
     @staticmethod
-    def summary(deliverables: List[Dict]) -> str:
-        names = [d.get("name", str(d)).replace("_", " ") for d in deliverables]
+    def summary(deliverablesList: List[Dict[str, Any]]) -> str:
+        names = [d.get("name", str(d)).replace("_", " ") for d in deliverablesList]
         return f"Deliver: {', '.join(names)}" if names else "Unclear request"
 
 
+PromptAgent = promptAgent
+
+
 if __name__ == "__main__":
-    import json as _json
-    agent = PromptAgent()
-    example = "Create a README, Dockerfile, and a login page with authentication, offline only"
-    print(_json.dumps(agent.process(example), indent = 2))
+    agent = promptAgent()
+    examplePrompt = "Create a README, Dockerfile, and a login page with authentication, offline only"
+    print(json.dumps(agent.process(examplePrompt), indent=2))

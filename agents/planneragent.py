@@ -1,42 +1,64 @@
+import os
 from typing import Dict, Any, Iterator
-from agents.models import DAGPlan, PlanningEvent
-from agents.deliverabledetector import DeliverableDetector
-from agents.dependencyresolver import DependencyResolver
-from agents.deliverableplanner import DeliverablePlanner
-from agents.dagmerger import DAGMerger
-from agents.streaming import StreamingPlanner
+from agents.models import dagPlan, planningEvent
+from agents.deliverabledetector import deliverableDetector
+from agents.dependencyresolver import dependencyResolver
+from agents.deliverableplanner import deliverablePlanner
+from agents.dagmerger import dagMerger
+from agents.streaming import streamingPlanner
+from agents.dagvisualization import visualizeDag
 
 
-class PlannerAgent:
-
+class plannerAgent:
     def __init__(self):
-        self.Detector = DeliverableDetector()
-        self.Resolver = DependencyResolver()
-        self.Planner = DeliverablePlanner()
-        self.Merger = DAGMerger()
-        self.StreamingPlanner = StreamingPlanner(
-            Detector = self.Detector,
-            Resolver = self.Resolver,
-            Planner = self.Planner,
-            Merger = self.Merger,
+        self.detector = deliverableDetector()
+        self.resolver = dependencyResolver()
+        self.planner = deliverablePlanner()
+        self.merger = dagMerger()
+        self.streamingPlanner = streamingPlanner(
+            detector = self.detector,
+            resolver = self.resolver,
+            planner = self.planner,
+            merger = self.merger,
         )
-        self.LastResult = None
+        self.lastResult = None
 
-    def plan(self, PromptAgentOutput: Dict[str, Any]) -> DAGPlan:
-        Deliverables = self.Detector.detect(PromptAgentOutput)
-        ResolvedDeliverables = self.Resolver.resolve(Deliverables)
+    def plan(self, promptAgentOutput: Dict[str, Any]) -> dagPlan:
+        deliverablesList = self.detector.detect(promptAgentOutput)
+        resolvedDeliverables = self.resolver.resolve(deliverablesList)
 
-        Plans = []
-        for Deliverable in ResolvedDeliverables:
-            Plan = self.Planner.plan(Deliverable)
-            Plans.append(Plan)
+        plansList = []
+        for targetDeliverable in resolvedDeliverables:
+            planItem = self.planner.plan(targetDeliverable)
+            plansList.append(planItem)
 
-        CombinedPlan = self.Merger.merge(Plans, ResolvedDeliverables)
-        self.LastResult = CombinedPlan
-        return CombinedPlan
+        combinedPlan = self.merger.merge(plansList, resolvedDeliverables)
+        self.lastResult = combinedPlan
+        self._autoVisualize(combinedPlan)
+        return combinedPlan
 
-    def plan_stream(self, PromptAgentOutput: Dict[str, Any]) -> Iterator[PlanningEvent]:
-        yield from self.StreamingPlanner.planStream(PromptAgentOutput)
-        self.LastResult = self.StreamingPlanner.LastResult
+    def planStream(self, promptAgentOutput: Dict[str, Any]) -> Iterator[planningEvent]:
+        yield from self.streamingPlanner.planStream(promptAgentOutput)
+        self.lastResult = self.streamingPlanner.lastResult
+        if self.lastResult:
+            self._autoVisualize(self.lastResult)
 
-    planStream = plan_stream
+    plan_stream = planStream
+
+    def _autoVisualize(self, plan: dagPlan) -> None:
+        try:
+            targetDirectory = os.path.join("work", "DAG")
+            visualizeDag(plan, outputDirectory=targetDirectory, baseFilename="dag_flow")
+        except Exception as err:
+            print(f"PlannerAgent's DAG visualization auto-save notice: {err}")
+
+    @property
+    def LastResult(self):
+        return self.lastResult
+
+    @LastResult.setter
+    def LastResult(self, value):
+        self.lastResult = value
+
+
+PlannerAgent = plannerAgent

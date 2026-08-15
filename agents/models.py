@@ -1,68 +1,67 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 import uuid
 
 
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    READY = "ready"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
+class taskStatus(str, Enum):
+    pending = "pending"
+    ready = "ready"
+    running = "running"
+    done = "done"
+    failed = "failed"
 
-def newId(Prefix: str) -> str:
 
-    return f"{Prefix}-{uuid.uuid4().hex[:6]}"
+def newId(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:6]}"
+
 
 @dataclass
-class TaskResult:
-    task_id: str
+class taskResult:
+    taskId: str
     success: bool
     message: str = ""
 
-@dataclass
-class TaskNode:
 
+@dataclass
+class taskNode:
     id: str
     deliverableId: str
     objective: str
     output: str
     completionCriteria: str
     parentTask: Optional[str] = None
-    childTasks: List[str] = field(default_factory = list)
-    dependencies: List[str] = field(default_factory = list)
+    childTasks: List[str] = field(default_factory=list)
+    dependencies: List[str] = field(default_factory=list)
     priority: int = 3
-    status: TaskStatus = TaskStatus.PENDING
-    metadata: dict = field(default_factory = dict)
+    status: str = "pending"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
-class Deliverable:
-
+class deliverable:
     id: str
     name: str
     kind: str
     goal: str
     scope: str = ""
-    requiredFiles: List[str] = field(default_factory = list)
-    explicitFilenames: List[str] = field(default_factory = list)
-    dependencies: List[str] = field(default_factory = list)
+    requiredFiles: List[str] = field(default_factory=list)
+    explicitFilenames: List[str] = field(default_factory=list)
+    dependencies: List[str] = field(default_factory=list)
     priority: int = 3
-    requirements: List[str] = field(default_factory = list)
+    requirements: List[str] = field(default_factory=list)
     reasoning: str = ""
-    metadata: dict = field(default_factory = dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class DeliverablePlan:
-
-    deliverable: Deliverable
-    tasks: List[TaskNode]
+class deliverablePlan:
+    deliverable: deliverable
+    tasks: List[taskNode]
 
 
 @dataclass
-class PlanningEvent:
-
+class planningEvent:
     stage: str
     message: str
     icon: str = "*"
@@ -71,7 +70,15 @@ class PlanningEvent:
 
 
 @dataclass
-class DAGPlan:
+class dagPlan:
+    taskNodes: List[taskNode]
+    deliverables: List[deliverable]
 
-    taskNodes: List[TaskNode]
-    deliverables: List[Deliverable]
+
+TaskStatus = taskStatus
+TaskResult = taskResult
+TaskNode = taskNode
+Deliverable = deliverable
+DeliverablePlan = deliverablePlan
+PlanningEvent = planningEvent
+DAGPlan = dagPlan
