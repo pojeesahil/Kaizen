@@ -1,7 +1,7 @@
 import json
 import re
 from typing import List, Optional, Any, Dict
-from agents.models import deliverable, taskNode, deliverablePlan, newId
+from agents.models import Deliverable, TaskNode, DeliverablePlan, newId, deliverable, taskNode, deliverablePlan
 from core.config import get_llm
 
 TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a compact, coarse-grained list of implementation tasks (maximum 2-3 tasks per deliverable).
@@ -135,3 +135,5 @@ def attachChild(tasks: List[TaskNode], parentId: str, childId: str) -> None:
         if task.id == parentId:
             task.childTasks.append(childId)
             return
+
+deliverablePlanner = DeliverablePlanner
