@@ -1,25 +1,25 @@
 import sys
 import time
 from typing import Dict, Any, Optional
-from agents.planneragent import PlannerAgent
-from agents.models import PlanningEvent, DAGPlan
+from agents.planneragent import plannerAgent
+from agents.models import planningEvent, dagPlan
 
-Reset = "\033[0m"
-Dim = "\033[2m"
-Bold = "\033[1m"
-Cyan = "\033[36m"
-Green = "\033[32m"
-Yellow = "\033[33m"
-Grey = "\033[90m"
+resetColor = "\033[0m"
+dimColor = "\033[2m"
+boldColor = "\033[1m"
+cyanColor = "\033[36m"
+greenColor = "\033[32m"
+yellowColor = "\033[33m"
+greyColor = "\033[90m"
 
-StageColor = {
-    "understanding": Cyan,
-    "deliverable": Yellow,
-    "merging": Cyan,
-    "done": Green,
+stageColor = {
+    "understanding": cyanColor,
+    "deliverable": yellowColor,
+    "merging": cyanColor,
+    "done": greenColor,
 }
 
-IconGlyph = {
+iconGlyph = {
     "Thinking": "\U0001F9E0",
     "OK": "\u2713",
     "Plan": "\U0001F4C4",
@@ -29,70 +29,72 @@ IconGlyph = {
     "Done": "\u2705",
 }
 
-BarWidth = 24
+barWidth = 24
 
 
-class TerminalUI:
+class terminalUi:
+    def __init__(self, stream=sys.stdout, paceSeconds: float = 0.02) -> None:
+        self.stream = stream
+        self.paceSeconds = paceSeconds
+        self.currentDeliverable: Optional[str] = None
 
-    def __init__(self, Stream = sys.stdout, PaceSeconds: float = 0.02) -> None:
-        self.Stream = Stream
-        self.PaceSeconds = PaceSeconds
-        self.CurrentDeliverable: Optional[str] = None
-
-    def run(self, PromptAgentOutput: Dict[str, Any]) -> DAGPlan:
-        Agent = PlannerAgent()
+    def run(self, promptAgentOutput: Dict[str, Any]) -> dagPlan:
+        agent = plannerAgent()
         self._divider()
-        for Event in Agent.planStream(PromptAgentOutput):
-            self.renderEvent(Event)
+        for eventItem in agent.planStream(promptAgentOutput):
+            self.renderEvent(eventItem)
         self._divider()
-        self._renderSummary(Agent.LastResult)
-        return Agent.LastResult
+        self._renderSummary(agent.lastResult)
+        return agent.lastResult
 
-    def renderEvent(self, Event: PlanningEvent) -> None:
-        self._maybeRenderDeliverableHeader(Event)
+    def renderEvent(self, eventItem: planningEvent) -> None:
+        self._maybeRenderDeliverableHeader(eventItem)
 
-        Color = StageColor.get(Event.stage, Reset)
-        Glyph = IconGlyph.get(Event.icon, Event.icon)
-        self._write(f"{Color}{Glyph}{Reset} {Event.message}")
+        colorVal = stageColor.get(eventItem.stage, resetColor)
+        glyphVal = iconGlyph.get(eventItem.icon, eventItem.icon)
+        self._write(f"{colorVal}{glyphVal}{resetColor} {eventItem.message}")
 
-        if Event.progress is not None:
-            self._write(self._progressBar(Event.progress))
+        if eventItem.progress is not None:
+            self._write(self._progressBar(eventItem.progress))
 
-        if self.PaceSeconds:
-            time.sleep(self.PaceSeconds)
+        if self.paceSeconds:
+            time.sleep(self.paceSeconds)
 
-    def _maybeRenderDeliverableHeader(self, Event: PlanningEvent) -> None:
-        IsNewDeliverable = (
-            Event.stage == "deliverable" and Event.deliverableName != self.CurrentDeliverable
+    def _maybeRenderDeliverableHeader(self, eventItem: planningEvent) -> None:
+        isNewDeliverable = (
+            eventItem.stage == "deliverable" and eventItem.deliverableName != self.currentDeliverable
         )
-        if not IsNewDeliverable:
+        if not isNewDeliverable:
             return
-        self.CurrentDeliverable = Event.deliverableName
+        self.currentDeliverable = eventItem.deliverableName
         self._divider()
-        self._write(f"{Bold}\U0001F4C4 Planning{Reset}")
-        self._write(f"  {Dim}\u2022{Reset} {Event.deliverableName}")
+        self._write(f"{boldColor}\U0001F4C4 Planning{resetColor}")
+        self._write(f"  {dimColor}\u2022{resetColor} {eventItem.deliverableName}")
 
-    def _renderSummary(self, DagPlan: Optional[DAGPlan]) -> None:
-        if DagPlan is None:
+    def _renderSummary(self, plan: Optional[dagPlan]) -> None:
+        if plan is None:
             return
-        self._write(f"{Bold}Planner summary{Reset}")
-        for Deliverable in DagPlan.deliverables:
-            DepNote = (
-                f" (depends on {len(Deliverable.dependencies)})"
-                if Deliverable.dependencies
+        self._write(f"{boldColor}Planner summary{resetColor}")
+        for targetDeliverable in plan.deliverables:
+            depNote = (
+                f" (depends on {len(targetDeliverable.dependencies)})"
+                if targetDeliverable.dependencies
                 else " (independent)"
             )
-            self._write(f"  {Green}\u2713{Reset} {Deliverable.name}{Grey}{DepNote}{Reset}")
-        self._write(f"{Bold}DAG summary{Reset}")
-        self._write(f"  {len(DagPlan.taskNodes)} tasks ready for the Scheduler")
+            self._write(f"  {greenColor}\u2713{resetColor} {targetDeliverable.name}{greyColor}{depNote}{resetColor}")
+        self._write(f"{boldColor}DAG summary{resetColor}")
+        self._write(f"  {len(plan.taskNodes)} tasks ready for the Scheduler")
 
-    def _progressBar(self, Progress: float) -> str:
-        Filled = int(BarWidth * Progress)
-        Bar = "\u2588" * Filled + "\u2591" * (BarWidth - Filled)
-        return f"  {Dim}[{Bar}] {int(Progress * 100)}%{Reset}"
+    def _progressBar(self, progressVal: float) -> str:
+        filledCount = int(barWidth * progressVal)
+        barStr = "\u2588" * filledCount + "\u2591" * (barWidth - filledCount)
+        return f"  {dimColor}[{barStr}] {int(progressVal * 100)}%{resetColor}"
 
     def _divider(self) -> None:
-        self._write(f"{Grey}{'-' * 40}{Reset}")
+        self._write(f"{greyColor}{'-' * 40}{resetColor}")
 
-    def _write(self, Text: str) -> None:
-        print(Text, file = self.Stream, flush = True)
+    def _write(self, textStr: str) -> None:
+        print(textStr, file=self.stream, flush=True)
+
+
+TerminalUI = terminalUi

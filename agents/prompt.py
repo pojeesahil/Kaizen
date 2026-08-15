@@ -57,17 +57,17 @@ def parseLLMjson(text: str) -> Any:
 def validateDeliverables(data: Any) -> List[Dict]:
     if not isinstance(data, dict) or "deliverables" not in data:
         return []
-    raw = data["deliverables"]
-    if not isinstance(raw, list) or not raw:
+    rawList = data["deliverables"]
+    if not isinstance(rawList, list) or not rawList:
         return []
 
-    valid = []
-    for item in raw:
+    validDeliverables = []
+    for item in rawList:
         if not isinstance(item, dict):
             continue
         if not all(k in item for k in ("id", "name", "kind", "goal")):
             continue
-        valid.append({
+        validDeliverables.append({
             "id": str(item["id"]).strip(),
             "name": str(item["name"]).strip(),
             "kind": str(item["kind"]).strip(),
@@ -76,7 +76,7 @@ def validateDeliverables(data: Any) -> List[Dict]:
             "dependencies": [str(d) for d in item.get("dependencies", []) if d] if isinstance(item.get("dependencies"), list) else [],
             "priority": max(1, min(5, int(item.get("priority", 3)))) if isinstance(item.get("priority"), (int, float)) else 3,
         })
-    return valid
+    return validDeliverables
 
 def fallbackDeliverable(userPrompt: str) -> List[Dict]:
     return [{
@@ -133,7 +133,7 @@ class PromptAgent:
             "complexity": complexity,
             "architecture": [],
             "domain": [projectType],
-            "deliverables": deliverables,
+            "deliverables": deliverablesList,
             "recommended_stack": {},
             "recommendedStack": {},
             "requirements": {"essential": [], "recommended": [], "optional": []},
@@ -142,8 +142,8 @@ class PromptAgent:
             "clarification_questions": [],
             "clarificationQuestions": [],
             "constraints": [],
-            "success_criteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverables],
-            "successCriteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverables],
+            "success_criteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverablesList],
+            "successCriteria": [f"{d['name']} is implemented, reviewed, and passes tests" for d in deliverablesList],
             "enhanced_request": userPrompt.strip(),
             "enhancedRequest": userPrompt.strip(),
             "planner_notes": plannerNotes,
@@ -153,6 +153,6 @@ class PromptAgent:
     run = process
 
     @staticmethod
-    def summary(deliverables: List[Dict]) -> str:
-        names = [d.get("name", str(d)).replace("_", " ") for d in deliverables]
+    def summary(deliverablesList: List[Dict[str, Any]]) -> str:
+        names = [d.get("name", str(d)).replace("_", " ") for d in deliverablesList]
         return f"Deliver: {', '.join(names)}" if names else "Unclear request"

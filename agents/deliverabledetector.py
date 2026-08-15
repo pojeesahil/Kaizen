@@ -1,6 +1,6 @@
 import re
 from typing import List, Dict, Any
-from agents.models import Deliverable, newId
+from agents.models import deliverable, newId
 
 def dedupe(items: List[Any]) -> List[str]:
     seen = set()
@@ -22,8 +22,13 @@ class DeliverableDetector:
 
         for item in rawDeliverables:
             if not isinstance(item, dict):
+        for item in rawDeliverables:
+            if not isinstance(item, dict):
                 continue
 
+            rawId = str(item.get("id", "")).strip()
+            if not rawId:
+                rawId = re.sub(r"\W+", "_", item.get("name", "deliverable").lower()).strip("_")
             rawId = str(item.get("id", "")).strip()
             if not rawId:
                 rawId = re.sub(r"\W+", "_", item.get("name", "deliverable").lower()).strip("_")
@@ -33,7 +38,14 @@ class DeliverableDetector:
             while rawId in seenIds:
                 rawId = f"{baseId}_{counter}"
                 counter += 1
+            baseId = rawId
+            counter = 1
+            while rawId in seenIds:
+                rawId = f"{baseId}_{counter}"
+                counter += 1
 
+            deliverableId = newId(rawId)
+            seenIds.add(rawId)
             deliverableId = newId(rawId)
             seenIds.add(rawId)
 

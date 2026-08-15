@@ -1,7 +1,7 @@
 import json
 import re
-from typing import List, Optional
-from agents.models import Deliverable, TaskNode, DeliverablePlan, newId
+from typing import List, Optional, Any, Dict
+from agents.models import deliverable, taskNode, deliverablePlan, newId
 from core.config import get_llm
 
 TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a compact, coarse-grained list of implementation tasks (maximum 2-3 tasks per deliverable).
@@ -34,7 +34,7 @@ Return ONLY a JSON object with this exact structure, no other text:
 def getPlannerLLM():
     return get_llm(model_name="qwen2.5:latest", temperature=0)
 
-def parseLLMjson(text: str):
+def parseLlmJson(text: str) -> Any:
     text = text.strip()
     try:
         return json.loads(text)
@@ -51,21 +51,21 @@ def parseLLMjson(text: str):
 def validateTasks(data) -> List[dict]:
     if not isinstance(data, dict) or "tasks" not in data:
         return []
-    raw = data["tasks"]
-    if not isinstance(raw, list) or not raw:
+    rawList = data["tasks"]
+    if not isinstance(rawList, list) or not rawList:
         return []
-    valid = []
-    for item in raw:
+    validTasks = []
+    for item in rawList:
         if not isinstance(item, dict):
             continue
         if "objective" not in item:
             continue
-        valid.append({
+        validTasks.append({
             "objective": str(item["objective"]).strip(),
             "output": str(item.get("output", "")).strip(),
             "completion_criteria": str(item.get("completion_criteria", "")).strip(),
         })
-    return valid
+    return validTasks
 
 def callLLMforTasks(deliverable: Deliverable) -> List[dict]:
     llm = getPlannerLLM()
