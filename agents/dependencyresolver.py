@@ -13,12 +13,22 @@ class dependencyResolver:
                 llmIdToActualMap[parts[0]] = d.id
             llmIdToActualMap[d.id] = d.id
 
+        codeDeliverableIds = [
+            d.id for d in deliverablesList
+            if not any(k in d.kind.lower() or k in d.name.lower() for k in ("readme", "doc", "documentation"))
+        ]
+
         for d in deliverablesList:
             remappedDeps = []
             for depId in d.dependencies:
                 actualId = llmIdToActualMap.get(depId)
                 if actualId:
                     remappedDeps.append(actualId)
+
+            # Documentation/README must strictly depend on all code deliverables
+            isDoc = any(k in d.kind.lower() or k in d.name.lower() for k in ("readme", "doc", "documentation"))
+            if isDoc and codeDeliverableIds:
+                remappedDeps.extend([cid for cid in codeDeliverableIds if cid != d.id])
 
             d.dependencies = self.dedupe(remappedDeps)
             d.dependencies = [dep for dep in d.dependencies if dep != d.id]

@@ -80,103 +80,115 @@ def addImport(path: str, module: str, name: str = "", alias: str = "") -> str:
 
 @tool
 def upsertFunction(path: str, functionCode: str) -> str:
-    """Add or replace a specific function in a file at the AST level without modifying other code."""
+    """Add or replace functions in a file at the AST level without modifying other code."""
     filePath = resolvePath(path)
     filePath.parent.mkdir(parents=True, exist_ok=True)
     try:
         fnTree = ast.parse(functionCode.strip())
-        fnNode = next((n for n in fnTree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
-        if not fnNode:
-            return "Error: Provided code does not contain a valid function definition."
-        fnName = fnNode.name
+        fnNodes = [n for n in fnTree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if not fnNodes:
+            return "Error: Provided code does not contain any valid function definitions."
     except Exception as e:
         return f"Error parsing function code: {str(e)}"
 
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(functionCode.strip() + "\n")
-        return f"Success: Created {filePath} with function '{fnName}'"
+        names = ", ".join(n.name for n in fnNodes)
+        return f"Success: Created {filePath} with function(s) '{names}'"
 
     with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
         src = f.read()
 
-    try:
-        fileTree = ast.parse(src, filename=str(filePath))
-        targetNode = next((n for n in fileTree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fnName), None)
-        if targetNode and hasattr(targetNode, "lineno") and hasattr(targetNode, "end_lineno"):
-            lines = src.splitlines(keepends=True)
-            before = lines[:targetNode.lineno - 1]
-            after = lines[targetNode.end_lineno:]
-            newSrc = "".join(before) + functionCode.strip() + "\n" + "".join(after)
-            with open(filePath, "w", encoding="utf-8") as f:
-                f.write(newSrc)
-            return f"Success: Replaced function '{fnName}' in {filePath}"
-    except Exception:
-        pass
+    processedNames = []
+    for fnNode in fnNodes:
+        fnName = fnNode.name
+        processedNames.append(fnName)
+        singleFnCode = ast.get_source_segment(functionCode.strip(), fnNode) or functionCode.strip()
 
-    mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)
-    if mainMatch:
-        splitIdx = mainMatch.start()
-        prefix = src[:splitIdx].rstrip()
-        mainBlock = src[splitIdx:].lstrip("\n")
-        newSrc = f"{prefix}\n\n{functionCode.strip()}\n\n{mainBlock}\n"
-    else:
-        spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
-        newSrc = src + spacing + functionCode.strip() + "\n"
+        replaced = False
+        try:
+            fileTree = ast.parse(src, filename=str(filePath))
+            targetNode = next((n for n in fileTree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fnName), None)
+            if targetNode and hasattr(targetNode, "lineno") and hasattr(targetNode, "end_lineno"):
+                lines = src.splitlines(keepends=True)
+                before = lines[:targetNode.lineno - 1]
+                after = lines[targetNode.end_lineno:]
+                src = "".join(before) + singleFnCode.strip() + "\n" + "".join(after)
+                replaced = True
+        except Exception:
+            pass
+
+        if not replaced:
+            mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)
+            if mainMatch:
+                splitIdx = mainMatch.start()
+                prefix = src[:splitIdx].rstrip()
+                mainBlock = src[splitIdx:].lstrip("\n")
+                src = f"{prefix}\n\n{singleFnCode.strip()}\n\n{mainBlock}\n"
+            else:
+                spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
+                src = src + spacing + singleFnCode.strip() + "\n"
 
     with open(filePath, "w", encoding="utf-8") as f:
-        f.write(newSrc)
-    return f"Success: Added function '{fnName}' to {filePath}"
+        f.write(src)
+    return f"Success: Upserted function(s) '{', '.join(processedNames)}' in {filePath}"
 
 @tool
 def upsertClass(path: str, classCode: str) -> str:
-    """Add or replace a specific class in a file at the AST level without modifying other code."""
+    """Add or replace classes in a file at the AST level without modifying other code."""
     filePath = resolvePath(path)
     filePath.parent.mkdir(parents=True, exist_ok=True)
     try:
         clsTree = ast.parse(classCode.strip())
-        clsNode = next((n for n in clsTree.body if isinstance(n, ast.ClassDef)), None)
-        if not clsNode:
-            return "Error: Provided code does not contain a valid class definition."
-        clsName = clsNode.name
+        clsNodes = [n for n in clsTree.body if isinstance(n, ast.ClassDef)]
+        if not clsNodes:
+            return "Error: Provided code does not contain any valid class definitions."
     except Exception as e:
         return f"Error parsing class code: {str(e)}"
 
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(classCode.strip() + "\n")
-        return f"Success: Created {filePath} with class '{clsName}'"
+        names = ", ".join(n.name for n in clsNodes)
+        return f"Success: Created {filePath} with class(es) '{names}'"
 
     with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
         src = f.read()
 
-    try:
-        fileTree = ast.parse(src, filename=str(filePath))
-        targetNode = next((n for n in fileTree.body if isinstance(n, ast.ClassDef) and n.name == clsName), None)
-        if targetNode and hasattr(targetNode, "lineno") and hasattr(targetNode, "end_lineno"):
-            lines = src.splitlines(keepends=True)
-            before = lines[:targetNode.lineno - 1]
-            after = lines[targetNode.end_lineno:]
-            newSrc = "".join(before) + classCode.strip() + "\n" + "".join(after)
-            with open(filePath, "w", encoding="utf-8") as f:
-                f.write(newSrc)
-            return f"Success: Replaced class '{clsName}' in {filePath}"
-    except Exception:
-        pass
+    processedNames = []
+    for clsNode in clsNodes:
+        clsName = clsNode.name
+        processedNames.append(clsName)
+        singleClsCode = ast.get_source_segment(classCode.strip(), clsNode) or classCode.strip()
 
-    mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)
-    if mainMatch:
-        splitIdx = mainMatch.start()
-        prefix = src[:splitIdx].rstrip()
-        mainBlock = src[splitIdx:].lstrip("\n")
-        newSrc = f"{prefix}\n\n{classCode.strip()}\n\n{mainBlock}\n"
-    else:
-        spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
-        newSrc = src + spacing + classCode.strip() + "\n"
+        replaced = False
+        try:
+            fileTree = ast.parse(src, filename=str(filePath))
+            targetNode = next((n for n in fileTree.body if isinstance(n, ast.ClassDef) and n.name == clsName), None)
+            if targetNode and hasattr(targetNode, "lineno") and hasattr(targetNode, "end_lineno"):
+                lines = src.splitlines(keepends=True)
+                before = lines[:targetNode.lineno - 1]
+                after = lines[targetNode.end_lineno:]
+                src = "".join(before) + singleClsCode.strip() + "\n" + "".join(after)
+                replaced = True
+        except Exception:
+            pass
+
+        if not replaced:
+            mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)
+            if mainMatch:
+                splitIdx = mainMatch.start()
+                prefix = src[:splitIdx].rstrip()
+                mainBlock = src[splitIdx:].lstrip("\n")
+                src = f"{prefix}\n\n{singleClsCode.strip()}\n\n{mainBlock}\n"
+            else:
+                spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
+                src = src + spacing + singleClsCode.strip() + "\n"
 
     with open(filePath, "w", encoding="utf-8") as f:
-        f.write(newSrc)
-    return f"Success: Added class '{clsName}' to {filePath}"
+        f.write(src)
+    return f"Success: Upserted class(es) '{', '.join(processedNames)}' in {filePath}"
 
 @tool
 def appendToFile(path: str, content: str) -> str:

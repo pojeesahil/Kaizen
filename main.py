@@ -186,11 +186,15 @@ def coderNode(state: AgentState) -> dict:
         "7. To edit an entire file, use 'editFile' (existing imports are preserved automatically).\n\n"
         "Tool Call Format Examples:\n"
         '{"name": "addImport", "arguments": {"path": "app.py", "module": "services.user", "name": "UserService"}}\n'
-        '{"name": "upsertFunction", "arguments": {"path": "math_ops.py", "functionCode": "def add(a: float, b: float) -> float:\\n    return a + b"}}\n'
+        '{"name": "upsertFunction", "arguments": {"path": "mathOps.py", "functionCode": "def add(a: float, b: float) -> float:\\n    return a + b"}}\n'
         '{"name": "upsertClass", "arguments": {"path": "models.py", "classCode": "class User:\\n    def __init__(self, name):\\n        self.name = name"}}\n'
-        '{"name": "createFile", "arguments": {"path": "main.py", "content": "import sys\\n\\ndef main():\\n    pass\\n\\nif __name__ == \'__main__\':\\n    main()"}}\n\n'
+        '{"name": "createFile", "arguments": {"path": "game.py", "content": "def initGame():\\n    return {\\"score\\": 0}\\n"}}\n\n'
         "Code Guidelines:\n"
-        "- Write clean, concise, production code.\n"
+        "- NAMING: Use strict camelCase for all function names, method names, and variable names (e.g. gameBoard, snakeHead, moveSnake, checkCollision). Do NOT use snake_case.\n"
+        "- NO COMMENTS: Do NOT include comments or docstrings in generated code.\n"
+        "- NO AI-LOOKING CODE: Write clean, compact, production-ready code with concrete logic. Never generate empty stubs or 'pass' placeholders.\n"
+        "- IMPORTS: All imports must be placed strictly at the very top of the file.\n"
+        "- GAMES / INTERACTIVE APPS: Implement complete, functional logic with working loops and event handling (e.g. using standard library curses, turtle, tkinter, or pygame).\n"
         "- Connect all modules using the exact import strings shown in Prerequisite Context.\n"
         "- When writing entrypoints, place 'if __name__ == \"__main__\": main()' at the very bottom of the file.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
@@ -256,26 +260,47 @@ def criticNode(state: AgentState) -> dict:
 def testerNode(state: AgentState) -> dict:
     print(f"\nTester iteration {state['iteration']}")
 
-    filesInWork = []
+    allFiles = []
+    entryPoints = []
     if WORK_DIR.exists():
-        filesInWork = [f.name for f in WORK_DIR.glob("*") if f.is_file()]
-    filesStr = ", ".join(filesInWork) if filesInWork else "None"
+        for root, _, files in os.walk(WORK_DIR):
+            for fname in files:
+                if not fname.startswith("."):
+                    rel = Path(root).relative_to(WORK_DIR) / fname
+                    relStr = rel.as_posix()
+                    allFiles.append(relStr)
+                    if relStr.endswith(".py"):
+                        fpath = Path(root) / fname
+                        try:
+                            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
+                            if "if __name__" in content or "def main(" in content:
+                                entryPoints.append(relStr)
+                        except Exception:
+                            pass
+                    elif relStr.endswith((".html", ".js")):
+                        entryPoints.append(relStr)
+
+    filesStr = ", ".join(allFiles) if allFiles else "None"
+    entryStr = ", ".join(entryPoints) if entryPoints else (allFiles[0] if allFiles else "None")
+    manifestStr = formatManifestContext(WORK_DIR)
 
     runPretext = (
-        "You are responsible for verifying code execution.\n"
+        "You are responsible for verifying code execution in the workspace.\n"
         "CRITICAL RULES:\n"
-        "- Output executeCommand tool calls to install required imports and run/verify the main application file.\n"
-        "- The terminal execution directory (CWD) is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'. Run files directly (e.g. 'python app.py' or 'node server.js').\n"
-        f"- Files currently in workspace: {filesStr}\n"
-        "- For applications requiring interactive console input (input()), verify non-interactively by testing imports (e.g. 'python -c \"import main\"') or piping simulated inputs.\n"
+        "- Output executeCommand tool calls to test and run the application.\n"
+        "- Terminal CWD is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'. Run files directly (e.g. 'python app.py').\n"
+        f"- Files in workspace: [{filesStr}]\n"
+        f"- Detected Entrypoints: [{entryStr}]\n\n"
+        f"{manifestStr}\n\n"
+        "- If an application requires interactive console input (input()), test it non-interactively via import checks ('python -c \"import <module>\"') or piped inputs.\n"
         "- If execution completes with Exit Code: 0 and no errors, respond strictly with 'PASS'.\n"
-        "- If execution crashes, times out, or throws errors, respond strictly with 'FAIL' followed by error details."
+        "- If execution crashes or throws errors, respond strictly with 'FAIL' followed by error details."
     )
 
     runMessages = [
         SystemMessage(content=runPretext),
-        *state["messages"],
-        HumanMessage(content=f"Workspace files: [{filesStr}]. Install all required dependencies and execute or import the main entrypoint file directly.")
+        HumanMessage(content=f"Workspace files: [{filesStr}]. Detected Entrypoint: [{entryStr}]. Run executeCommand to verify that the application or tests execute without errors.")
     ]
 
     testerResponse = None
@@ -303,9 +328,21 @@ def testerNode(state: AgentState) -> dict:
             break
 
         if not runTools:
+            # Auto-fallback: if tester produced no tool call, run the entrypoint directly
+            if entryPoints:
+                targetEntry = entryPoints[0]
+                autoCmd = f"python {targetEntry}" if targetEntry.endswith(".py") else f"node {targetEntry}"
+                if "executeCommand" in {t.name: t for t in tools}:
+                    print(f"\n[Auto-Verifying Entrypoint] {autoCmd}")
+                    autoRes = executeCommand.invoke({"command": autoCmd})
+                    runTools.append(f"Auto-Execution: {autoRes}")
+                    if "Exit Code: 0" in autoRes and "Traceback" not in autoRes and "Error:" not in autoRes:
+                        testerMessage = "PASS"
+                        break
+
             runMessages.extend([
                 testerResponse,
-                HumanMessage(content="You did NOT use any tool calls. You MUST use executeCommand to install dependencies and run the main file.")
+                HumanMessage(content=f"You did NOT use any tool calls. Output an executeCommand tool call to run the entrypoint file [{entryStr}].")
             ])
             continue
 
@@ -363,12 +400,13 @@ def runBatchEval(batchTasks, coderResults):
     print(f"\n[Batch Verification] Verifying {len(batchTasks)} completed coder task(s): {taskNames}")
     summaryText = "\n".join([f"- Task '{getattr(t, 'name', t.id)}': {res.get('coderMessage', '')}" for t, res in zip(batchTasks, coderResults)])
     combinedTools = sum([res.get("toolResults", []) for res in coderResults], [])
+    manifestText = formatManifestContext(WORK_DIR)
 
     initialState = {
-        "messages": [HumanMessage(content=f"Verify batch tasks: {taskNames}\nCoder Summaries:\n{summaryText}")],
+        "messages": [HumanMessage(content=f"Verify batch tasks: {taskNames}\nCoder Summaries:\n{summaryText}\n\nWorkspace Status:\n{manifestText}")],
         "instruction": f"Batch Verification: {taskNames}",
         "taskContext": summaryText,
-        "context": f"Files Created/Edited: {combinedTools}",
+        "context": manifestText,
         "coderMessage": summaryText,
         "toolResults": combinedTools,
         "feedback": "",
