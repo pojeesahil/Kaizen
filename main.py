@@ -193,30 +193,39 @@ def coderNode(state: AgentState) -> dict:
 
     if any(e in (".js", ".ts", ".jsx", ".tsx") for e in exts) or any(w in instText for w in ("node", "npm", "express", "javascript", "js", "react", "next")):
         langGuideline = (
-            "- TECH STACK: Node.js / JavaScript. Use Node.js/JS syntax (e.g. const express = require('express'); or import ... from ...).\n"
-            "- CRITICAL: Do NOT use Python syntax (such as 'from x import y', Flask decorators like '@app.route', or def main()).\n"
-            "- CRITICAL: Do NOT write 'if __name__ == \"__main__\":' in JavaScript files! Run servers directly using app.listen(3000, ...).\n"
+            "- TECH STACK: Node.js / JavaScript. Write every file in pure JS/Node.js CJS syntax using require() and module.exports.\n"
+            "- CRITICAL: NEVER use Python syntax. Do NOT write 'from x import y', '@app.route', 'def ', or 'if __name__' anywhere in a .js file.\n"
+            "- CRITICAL: Every file that imports another must use require() with the correct relative path (e.g. const controller = require('./controller');).\n"
+            "- CRITICAL: Every exported handler or router must be explicitly linked via require() in the parent file. No file should be left disconnected.\n"
+            "- CRITICAL: Do NOT hardcode secrets, passwords, emails, API keys, or URIs. Read all configurable values from process.env with a safe fallback (e.g. process.env.PORT || 3000).\n"
+            "- CRITICAL: Use dotenv at the top of the entrypoint file: require('dotenv').config();\n"
+            "- All route handlers must be fully implemented functions, not empty stubs or TODO comments.\n"
         )
     elif any(e == ".go" for e in exts) or "go" in instText or "golang" in instText:
         langGuideline = (
             "- TECH STACK: Go (Golang). Use standard Go syntax, package declarations, and func main().\n"
             "- CRITICAL: Do NOT mix Python or JavaScript syntax in Go files.\n"
+            "- CRITICAL: Do NOT hardcode configurable values. Use os.Getenv() with fallback defaults.\n"
         )
     elif any(e in (".c", ".cpp", ".cc", ".h", ".hpp") for e in exts) or any(w in instText for w in ("c++", "cpp", "gcc", "g++", "c language")):
         langGuideline = (
             "- TECH STACK: C / C++. Use standard C/C++ includes (#include <...>), header files, and int main().\n"
+            "- CRITICAL: Do NOT hardcode configurable values. Use #define constants or command-line arguments.\n"
         )
     elif any(e == ".java" for e in exts) or "java" in instText:
         langGuideline = (
             "- TECH STACK: Java. Use public class matching filename and public static void main(String[] args).\n"
+            "- CRITICAL: Do NOT hardcode configurable values. Read from System.getenv() or properties files.\n"
         )
     elif any(e in (".html", ".css") for e in exts) or any(w in instText for w in ("html", "css", "website", "web page", "frontend")):
         langGuideline = (
             "- TECH STACK: HTML / CSS / JS. Create semantic HTML5, CSS stylesheets, and client-side JS.\n"
+            "- CRITICAL: Do NOT hardcode environment-specific URLs or API keys in HTML/JS. Use configurable constants at the top of JS files.\n"
         )
     else:
         langGuideline = (
             "- TECH STACK: Python. Use standard Python 3 syntax. Place 'if __name__ == \"__main__\": main()' at the very bottom of entrypoint files.\n"
+            "- CRITICAL: Do NOT hardcode configurable values. Use os.environ.get() with fallback defaults.\n"
         )
 
     coderPretext = (
@@ -236,11 +245,12 @@ def coderNode(state: AgentState) -> dict:
         '{"name": "createFile", "arguments": {"path": "server.js", "content": "const express = require(\\"express\\");\\nconst app = express();\\napp.listen(3000);\\n"}}\n\n'
         "Code Guidelines:\n"
         f"{langGuideline}"
-        "- NAMING: Use strict camelCase for all function names, method names, and variable names (e.g. gameBoard, snakeHead, moveSnake, checkCollision). Do NOT use snake_case.\n"
-        "- NO COMMENTS: Do NOT include comments or docstrings in generated code.\n"
-        "- NO AI-LOOKING CODE: Write clean, compact, production-ready code with concrete logic. Never generate empty stubs or 'pass' placeholders.\n"
-        "- IMPORTS: All imports must be placed strictly at the very top of the file.\n"
-        "- Connect all modules using exact import statements required by the language environment.\n\n"
+        "- NAMING: Use strict camelCase for all function names, method names, and variable names. Do NOT use snake_case.\n"
+        "- NO COMMENTS: Do NOT include comments, docstrings, or TODO placeholders in generated code.\n"
+        "- NO STUBS: Every function and route handler must contain complete, working implementation logic. Never leave a function body empty or with only a placeholder comment.\n"
+        "- NO HARDCODED VALUES: Never hardcode passwords, secrets, emails, API keys, port numbers, or URIs. Use environment variables with safe fallback defaults.\n"
+        "- IMPORTS: All imports/requires must be placed at the very top of each file. Every file must only import modules it directly uses.\n"
+        "- FULL LINKAGE: Every module that is created must be explicitly required/imported in the file that uses it. Do not create orphaned files with no incoming require() or import.\n\n"
         f"Workspace Context:\n{state['context']}\n\n"
         f"Prerequisite Tasks Context:\n{state['taskContext'] if state['taskContext'] else 'None'}\n\n"
         f"Critic/Tester Feedback to address:\n{state['feedback']}"
