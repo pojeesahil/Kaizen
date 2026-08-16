@@ -1,20 +1,13 @@
 from agents.models import DAGPlan, TaskNode, newId
 
-
 class HITLReview:
-    """
-    Simple Human-in-the-Loop review for the planner.
-    Lets the user approve, edit, add, or delete tasks.
-    """
-
-    def __init__(self, dag_plan: DAGPlan):
-        self.dag_plan = dag_plan
+    def __init__(self, dagPlan: DAGPlan):
+        self.dagPlan = dagPlan
+        self.dag_plan = dagPlan
 
     def run(self) -> DAGPlan:
-        """Main loop: shows tasks and asks the user to approve or edit."""
         while True:
-            tasks = self.dag_plan.taskNodes
-
+            tasks = self.dagPlan.taskNodes
             print("\nPlan Review")
             for index, task in enumerate(tasks, start=1):
                 print(f"  {index}. {task.objective}")
@@ -24,22 +17,17 @@ class HITLReview:
             print("  [e] Edit tasks")
 
             choice = input("\nEnter choice (a/e): ").strip().lower()
-
             if choice == "a":
                 print("\nPlan approved! Starting execution...\n")
-                return self.dag_plan
-
+                return self.dagPlan
             elif choice == "e":
-                self.edit_tasks()
-
+                self.editTasks()
             else:
                 print("Invalid choice! Please type 'a' to approve or 'e' to edit.")
 
-    def edit_tasks(self):
-        """Simple menu to edit, add, or delete tasks."""
+    def editTasks(self):
         while True:
-            tasks = self.dag_plan.taskNodes
-
+            tasks = self.dagPlan.taskNodes
             print("\n--- Current Tasks ---")
             for index, task in enumerate(tasks, start=1):
                 print(f"  {index}. {task.objective}")
@@ -51,16 +39,15 @@ class HITLReview:
             print("  4. Done editing (go back)")
 
             choice = input("\nEnter option (1-4): ").strip()
-
             if choice == "1":
                 num = input("Enter task number to edit: ").strip()
                 if num.isdigit():
                     idx = int(num) - 1
                     if 0 <= idx < len(tasks):
                         print(f"Current: {tasks[idx].objective}")
-                        new_text = input("Enter new objective: ").strip()
-                        if new_text:
-                            tasks[idx].objective = new_text
+                        newText = input("Enter new objective: ").strip()
+                        if newText:
+                            tasks[idx].objective = newText
                             print("Task updated!")
                     else:
                         print("Invalid task number.")
@@ -68,23 +55,23 @@ class HITLReview:
                     print("Please enter a valid number.")
 
             elif choice == "2":
-                new_text = input("Enter new task objective: ").strip()
-                if new_text:
-                    last_task = tasks[-1] if len(tasks) > 0 else None
-                    last_id = last_task.id if last_task else None
-                    deliverable_id = last_task.deliverableId if last_task else "manual"
+                newText = input("Enter new task objective: ").strip()
+                if newText:
+                    lastTask = tasks[-1] if len(tasks) > 0 else None
+                    lastId = lastTask.id if lastTask else None
+                    deliverableId = lastTask.deliverableId if lastTask else "manual"
 
-                    new_task = TaskNode(
+                    newTask = TaskNode(
                         id=newId("task"),
-                        deliverableId=deliverable_id,
-                        objective=new_text,
-                        output=new_text,
-                        completionCriteria=f"{new_text} completed.",
-                        parentTask=last_id,
-                        dependencies=[last_id] if last_id else [],
+                        deliverableId=deliverableId,
+                        objective=newText,
+                        output=newText,
+                        completionCriteria=f"{newText} completed.",
+                        parentTask=lastId,
+                        dependencies=[lastId] if lastId else [],
                         priority=3,
                     )
-                    tasks.append(new_task)
+                    tasks.append(newTask)
                     print("New task added!")
 
             elif choice == "3":
@@ -102,11 +89,12 @@ class HITLReview:
             elif choice == "4":
                 print("Finished editing.")
                 break
-
             else:
                 print("Invalid option. Please enter 1, 2, 3, or 4.")
 
-def final_review():
+    edit_tasks = editTasks
+
+def finalReview() -> str:
     print("\n--- Final Review ---")
     print("Code is written and tested.")
     print("  [a] Accept")
@@ -114,14 +102,13 @@ def final_review():
 
     while True:
         choice = input("\nEnter choice (a/r): ").strip().lower()
-
         if choice == "a":
             print("\nAccepted! Work is complete.\n")
             return "accept"
-
         elif choice == "r":
             print("\nRejected. Re-running coder...\n")
             return "reject"
-
         else:
             print("Enter 'a' to accept or 'r' to reject.")
+
+final_review = finalReview

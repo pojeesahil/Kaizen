@@ -1,31 +1,34 @@
-from typing import List, Dict
-from agents.models import Deliverable, DeliverablePlan, TaskNode, DAGPlan
+from typing import List, Dict, Optional
+from agents.models import deliverable, deliverablePlan, taskNode, dagPlan
 
 
-class DAGMerger:
-    def merge(self, Plans: List[DeliverablePlan], Deliverables: List[Deliverable] = None) -> DAGPlan:
-        Deliverables = Deliverables or [p.deliverable for p in Plans]
-        AllTasks: List[TaskNode] = []
-        FirstTaskByDeliverable: Dict[str, str] = {}
-        LastTaskByDeliverable: Dict[str, str] = {}
+class dagMerger:
+    def merge(self, plansList: List[deliverablePlan], deliverablesList: Optional[List[deliverable]] = None) -> dagPlan:
+        deliverablesList = deliverablesList or [p.deliverable for p in plansList]
+        allTasks: List[taskNode] = []
+        firstTaskByDeliverable: Dict[str, str] = {}
+        lastTaskByDeliverable: Dict[str, str] = {}
 
-        for Plan in Plans:
-            if not Plan.tasks:
+        for planItem in plansList:
+            if not planItem.tasks:
                 continue
-            FirstTaskByDeliverable[Plan.deliverable.id] = Plan.tasks[0].id
-            LastTaskByDeliverable[Plan.deliverable.id] = Plan.tasks[-1].id
-            AllTasks.extend(Plan.tasks)
+            firstTaskByDeliverable[planItem.deliverable.id] = planItem.tasks[0].id
+            lastTaskByDeliverable[planItem.deliverable.id] = planItem.tasks[-1].id
+            allTasks.extend(planItem.tasks)
 
-        TaskById = {Task.id: Task for Task in AllTasks}
+        taskByIdMap = {t.id: t for t in allTasks}
 
-        for Deliverable in Deliverables:
-            EntryTaskId = FirstTaskByDeliverable.get(Deliverable.id)
-            if not EntryTaskId:
+        for deliverableItem in deliverablesList:
+            entryTaskId = firstTaskByDeliverable.get(deliverableItem.id)
+            if not entryTaskId:
                 continue
-            EntryTask = TaskById[EntryTaskId]
-            for DepDeliverableId in Deliverable.dependencies:
-                DepExitId = LastTaskByDeliverable.get(DepDeliverableId)
-                if DepExitId and DepExitId not in EntryTask.dependencies:
-                    EntryTask.dependencies.append(DepExitId)
+            entryTask = taskByIdMap[entryTaskId]
+            for depDeliverableId in deliverableItem.dependencies:
+                depExitId = lastTaskByDeliverable.get(depDeliverableId)
+                if depExitId and depExitId not in entryTask.dependencies:
+                    entryTask.dependencies.append(depExitId)
 
-        return DAGPlan(taskNodes = AllTasks, deliverables = Deliverables)
+        return dagPlan(taskNodes=allTasks, deliverables=deliverablesList)
+
+
+DAGMerger = dagMerger
