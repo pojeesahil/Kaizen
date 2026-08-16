@@ -7,5 +7,6 @@ chroma_db/
 chroma.sqlite3
 chroma_db/chroma.sqlite3
 network.html
+venv/
 rag/graph_visualize.py
 .github

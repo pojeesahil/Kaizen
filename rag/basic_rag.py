@@ -4,7 +4,7 @@ from rag.interface import RAGInterface
 SUPPORTED_EXTENSIONS = [
     ".py", ".js", ".ts", ".java", ".kt", ".go",
     ".cpp", ".c", ".h", ".jsx", ".tsx",
-    ".html", ".css", ".json", ".yaml", ".yml", ".md"
+    ".html", ".css", ".json", ".yaml", ".yml", ".md", "txt", "cs"
 ]
 
 SKIP_DIRS = {"__pycache__", "venv", ".git", ".venv"}
@@ -38,30 +38,39 @@ class BasicRAG(RAGInterface):
         print(f"[BasicRAG] indexed {len(self.chunks)} chunks from {path}")
 
     def _chunk_file(self, text, fpath):
-        lines = text.split("\n")
-        buf = []
-        added = 0
+        lines = text.splitlines()
+        blocks = []
+        current = []
 
         for line in lines:
-            buf.append(line)
-            if len(buf) >= 50:
-                chunk = "\n".join(buf)
+            stripped = line.lstrip()
+            if stripped.startswith(("def ", "async def ", "class ")) and current:
+                blocks.append(current)
+                current = []
+            current.append(line)
+        if current:
+            blocks.append(current)
+
+        added = 0
+        for block in blocks:
+            if len(block) > 60:
+                step = 50 
+                for i in range(0, len(block), step):
+                    chunk = "\n".join(block[i:i + 60])
+                    if chunk.strip():
+                        self.chunks.append({"content": chunk, "file_path": fpath})
+                        added += 1
+            else:
+                chunk = "\n".join(block)
                 if chunk.strip():
                     self.chunks.append({"content": chunk, "file_path": fpath})
                     added += 1
-                buf = []
-
-        if buf:
-            chunk = "\n".join(buf)
-            if chunk.strip():
-                self.chunks.append({"content": chunk, "file_path": fpath})
-                added += 1
 
         if added == 0 and text.strip():
             self.chunks.append({"content": text, "file_path": fpath})
 
     def retrieve(self, query, top_k=5):
-        if not self.chunks:
+        if not self.chunks: 
             return []
 
         words = query.lower().split()
@@ -85,13 +94,13 @@ class BasicRAG(RAGInterface):
         if not results:
             return "No relevant code found."
 
-        parts = []
+        parts = [] #stores formatted strings of results to return to the agent 
         for r in results:
             parts.append(f"--- {r['file_path']} (score: {r['score']}) ---\n{r['content']}")
         return "\n\n".join(parts)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": #this code runs only if this file is run as a script
     rag = BasicRAG()
-    rag.index_codebase(".")
+    rag.index_codebase(".") #index the current directory
     print(rag.get_context_for_agent("retrieve search", top_k=2))
