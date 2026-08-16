@@ -149,4 +149,19 @@ def attachChild(tasks: List[TaskNode], parentId: str, childId: str) -> None:
             task.childTasks.append(childId)
             return
 
+<<<<<<< Updated upstream
 deliverablePlanner = DeliverablePlanner
+=======
+    @staticmethod
+    def _completionCriteria(Step: str, Deliverable: Deliverable, IsLast: bool) -> str:
+        if IsLast:
+            return f"{Deliverable.name} exists, matches spec, and passes validation."
+        return f"'{Step}' complete for {Deliverable.name}."
+
+
+def _attachChild(Tasks: List[TaskNode], ParentId: str, ChildId: str) -> None:
+    for Task in Tasks:
+        if Task.id == ParentId:
+            Task.childTasks.append(ChildId)
+            return
+>>>>>>> Stashed changes
