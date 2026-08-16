@@ -1,0 +1,19 @@
+DAG VISUALIZATION
+
+Deliverable: [coreLogic-a6ae79] Core Game Logic (Priority: 1, Depends on: none)
+  |-- Task [coreLogic-a6ae79-t1-2c4dbb]: Implement snake movement control logic. (deps: none)
+  |-- Task [coreLogic-a6ae79-t2-dedd9d]: Implement food generation logic. (deps: coreLogic-a6ae79-t1-2c4dbb)
+  |-- Task [coreLogic-a6ae79-t3-944761]: Implement collision detection and scoring logic. (deps: coreLogic-a6ae79-t2-dedd9d)
+
+Deliverable: [gameUi-0ff351] Game User Interface (Priority: 1, Depends on: coreLogic-a6ae79)
+  |-- Task [gameUi-0ff351-t1-50d335]: Create a new React component for the game board. (deps: coreLogic-a6ae79-t3-944761)
+  |-- Task [gameUi-0ff351-t2-dd85d6]: Implement snake rendering in the game board component. (deps: gameUi-0ff351-t1-50d335)
+  |-- Task [gameUi-0ff351-t3-59a347]: Add food rendering functionality to the game board component. (deps: gameUi-0ff351-t2-dd85d6)
+  |-- Task [gameUi-0ff351-t4-827141]: Create a function to display the score in the game board component. (deps: gameUi-0ff351-t3-59a347)
+
+Deliverable: [mainLoop-735ece] Game Main Loop (Priority: 1, Depends on: coreLogic-a6ae79, gameUi-0ff351)
+  |-- Task [mainLoop-735ece-t1-a6c466]: Create a new file named `game_loop.js` to encapsulate the game's main loop logic. (deps: coreLogic-a6ae79-t3-944761, gameUi-0ff351-t4-827141)
+  |-- Task [mainLoop-735ece-t2-e536c7]: Implement the game loop function in `game_loop.js` to handle frame updates and rendering. (deps: mainLoop-735ece-t1-a6c466)
+
+Deliverable: [readme-48bd61] Project Documentation (Priority: 5, Depends on: coreLogic-a6ae79, gameUi-0ff351, mainLoop-735ece)
+  |-- Task [readme-48bd61-t1-dcee23]: Create a README.md file in the project root directory. (deps: coreLogic-a6ae79-t3-944761, gameUi-0ff351-t4-827141, mainLoop-735ece-t2-e536c7)

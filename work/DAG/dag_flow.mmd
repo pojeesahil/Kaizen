@@ -1,0 +1,31 @@
+flowchart TD
+subgraph sub_coreLogic_a6ae79 ["Core Game Logic"]
+coreLogic_a6ae79_t1_2c4dbb["Implement snake movement control logic."]
+coreLogic_a6ae79_t2_dedd9d["Implement food generation logic."]
+coreLogic_a6ae79_t3_944761["Implement collision detection and scoring logic."]
+end
+subgraph sub_gameUi_0ff351 ["Game User Interface"]
+gameUi_0ff351_t1_50d335["Create a new React component for the game board."]
+gameUi_0ff351_t2_dd85d6["Implement snake rendering in the game board component."]
+gameUi_0ff351_t3_59a347["Add food rendering functionality to the game board component."]
+gameUi_0ff351_t4_827141["Create a function to display the score in the game board component."]
+end
+subgraph sub_mainLoop_735ece ["Game Main Loop"]
+mainLoop_735ece_t1_a6c466["Create a new file named `game_loop.js` to encapsulate the game's main loop logic."]
+mainLoop_735ece_t2_e536c7["Implement the game loop function in `game_loop.js` to handle frame updates and rendering."]
+end
+subgraph sub_readme_48bd61 ["Project Documentation"]
+readme_48bd61_t1_dcee23["Create a README.md file in the project root directory."]
+end
+coreLogic_a6ae79_t1_2c4dbb --> coreLogic_a6ae79_t2_dedd9d
+coreLogic_a6ae79_t2_dedd9d --> coreLogic_a6ae79_t3_944761
+coreLogic_a6ae79_t3_944761 --> gameUi_0ff351_t1_50d335
+gameUi_0ff351_t1_50d335 --> gameUi_0ff351_t2_dd85d6
+gameUi_0ff351_t2_dd85d6 --> gameUi_0ff351_t3_59a347
+gameUi_0ff351_t3_59a347 --> gameUi_0ff351_t4_827141
+coreLogic_a6ae79_t3_944761 --> mainLoop_735ece_t1_a6c466
+gameUi_0ff351_t4_827141 --> mainLoop_735ece_t1_a6c466
+mainLoop_735ece_t1_a6c466 --> mainLoop_735ece_t2_e536c7
+coreLogic_a6ae79_t3_944761 --> readme_48bd61_t1_dcee23
+gameUi_0ff351_t4_827141 --> readme_48bd61_t1_dcee23
+mainLoop_735ece_t2_e536c7 --> readme_48bd61_t1_dcee23

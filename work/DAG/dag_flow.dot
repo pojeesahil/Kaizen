@@ -1,0 +1,42 @@
+digraph DAGPlan {
+rankdir = "TB";
+node [shape = box, style = rounded];
+subgraph cluster_coreLogic_a6ae79 {
+label="Core Game Logic";
+style=dashed;
+        coreLogic_a6ae79_t1_2c4dbb [label="Implement snake movement control logic."];
+        coreLogic_a6ae79_t2_dedd9d [label="Implement food generation logic."];
+        coreLogic_a6ae79_t3_944761 [label="Implement collision detection and scoring logic."];
+}
+subgraph cluster_gameUi_0ff351 {
+label="Game User Interface";
+style=dashed;
+        gameUi_0ff351_t1_50d335 [label="Create a new React component for the game board."];
+        gameUi_0ff351_t2_dd85d6 [label="Implement snake rendering in the game board component."];
+        gameUi_0ff351_t3_59a347 [label="Add food rendering functionality to the game board component."];
+        gameUi_0ff351_t4_827141 [label="Create a function to display the score in the game board component."];
+}
+subgraph cluster_mainLoop_735ece {
+label="Game Main Loop";
+style=dashed;
+        mainLoop_735ece_t1_a6c466 [label="Create a new file named `game_loop.js` to encapsulate the game's main loop logic."];
+        mainLoop_735ece_t2_e536c7 [label="Implement the game loop function in `game_loop.js` to handle frame updates and rendering."];
+}
+subgraph cluster_readme_48bd61 {
+label="Project Documentation";
+style=dashed;
+        readme_48bd61_t1_dcee23 [label="Create a README.md file in the project root directory."];
+}
+    coreLogic_a6ae79_t1_2c4dbb -> coreLogic_a6ae79_t2_dedd9d;
+    coreLogic_a6ae79_t2_dedd9d -> coreLogic_a6ae79_t3_944761;
+    coreLogic_a6ae79_t3_944761 -> gameUi_0ff351_t1_50d335;
+    gameUi_0ff351_t1_50d335 -> gameUi_0ff351_t2_dd85d6;
+    gameUi_0ff351_t2_dd85d6 -> gameUi_0ff351_t3_59a347;
+    gameUi_0ff351_t3_59a347 -> gameUi_0ff351_t4_827141;
+    coreLogic_a6ae79_t3_944761 -> mainLoop_735ece_t1_a6c466;
+    gameUi_0ff351_t4_827141 -> mainLoop_735ece_t1_a6c466;
+    mainLoop_735ece_t1_a6c466 -> mainLoop_735ece_t2_e536c7;
+    coreLogic_a6ae79_t3_944761 -> readme_48bd61_t1_dcee23;
+    gameUi_0ff351_t4_827141 -> readme_48bd61_t1_dcee23;
+    mainLoop_735ece_t2_e536c7 -> readme_48bd61_t1_dcee23;
+}

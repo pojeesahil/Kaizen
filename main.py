@@ -192,192 +192,36 @@ def coderNode(state: AgentState) -> dict:
     exts = {f.suffix.lower() for f in filesInWork if f.is_file()}
 
     if any(e in (".js", ".ts", ".jsx", ".tsx") for e in exts) or any(w in instText for w in ("node", "npm", "express", "javascript", "js", "react", "next")):
-        langGuideline = (
-            "- TECH STACK: Node.js / JavaScript. Write every file in pure JS/Node.js CJS syntax using require() and module.exports.\n"
-            "- CRITICAL: NEVER use Python syntax. Do NOT write 'from x import y', '@app.route', 'def ', or 'if __name__' anywhere in a .js file.\n"
-            "- CRITICAL: Every file that imports another must use require() with the correct relative path (e.g. const controller = require('./controller');).\n"
-            "- CRITICAL: Every exported handler or router must be explicitly linked via require() in the parent file. No file should be left disconnected.\n"
-            "- CRITICAL: Do NOT hardcode secrets, passwords, emails, API keys, or URIs. Read all configurable values from process.env with a safe fallback (e.g. process.env.PORT || 3000).\n"
-            "- CRITICAL: Use dotenv at the top of the entrypoint file: require('dotenv').config();\n"
-            "- All route handlers must be fully implemented functions, not empty stubs or TODO comments.\n"
-        )
+        langGuideline = "Tech Stack: Node.js / JavaScript (CJS). Use require() and module.exports. Link all routes and handlers. Use dotenv / process.env for config."
     elif any(e == ".go" for e in exts) or "go" in instText or "golang" in instText:
-        langGuideline = (
-            "- TECH STACK: Go (Golang). Use standard Go syntax, package declarations, and func main().\n"
-            "- CRITICAL: Do NOT mix Python or JavaScript syntax in Go files.\n"
-            "- CRITICAL: Do NOT hardcode configurable values. Use os.Getenv() with fallback defaults.\n"
-        )
+        langGuideline = "Tech Stack: Go. Use standard package declarations, imports, and func main(). Use os.Getenv() for config."
     elif any(e in (".c", ".cpp", ".cc", ".h", ".hpp") for e in exts) or any(w in instText for w in ("c++", "cpp", "gcc", "g++", "c language")):
-        langGuideline = (
-            "- TECH STACK: C / C++. Use standard C/C++ includes (#include <...>), header files, and int main().\n"
-            "- CRITICAL: Do NOT hardcode configurable values. Use #define constants or command-line arguments.\n"
-        )
+        langGuideline = "Tech Stack: C / C++. Use standard headers (#include), header guards, and int main()."
     elif any(e == ".java" for e in exts) or "java" in instText:
-        langGuideline = (
-            "- TECH STACK: Java. Use public class matching filename and public static void main(String[] args).\n"
-            "- CRITICAL: Do NOT hardcode configurable values. Read from System.getenv() or properties files.\n"
-        )
+        langGuideline = "Tech Stack: Java. Class name must match filename with public static void main(String[] args)."
     elif any(e in (".html", ".css") for e in exts) or any(w in instText for w in ("html", "css", "website", "web page", "frontend")):
-        langGuideline = (
-            "- TECH STACK: HTML / CSS / JS. Create semantic HTML5, CSS stylesheets, and client-side JS.\n"
-            "- CRITICAL: Do NOT hardcode environment-specific URLs or API keys in HTML/JS. Use configurable constants at the top of JS files.\n"
-        )
+        langGuideline = "Tech Stack: HTML5 / CSS / JavaScript. Dynamic DOM manipulation and fetch() for API calls."
     else:
-        langGuideline = (
-            "- TECH STACK: Python. Use standard Python 3 syntax. Place 'if __name__ == \"__main__\": main()' at the very bottom of entrypoint files.\n"
-            "- CRITICAL: Do NOT hardcode configurable values. Use os.environ.get() with fallback defaults.\n"
-        )
+        langGuideline = "Tech Stack: Python. Standard Python 3 syntax. Use os.environ.get() for config and place if __name__ == '__main__': at entrypoints."
 
     taskContext = state.get("taskContext", "") or "None"
-    feedbackContext = state.get("feedback", "")
-    workspaceContext = state.get("context", "")
+    feedbackContext = state.get("feedback", "") or "None"
+    workspaceContext = state.get("context", "") or "None"
 
-    coderPretext = f"""You are an autonomous software engineer operating on a real multi-file workspace using AST-level workspace tools.
-Your goal is NOT merely to generate files. Your goal is to produce a COMPLETE, CONNECTED, BUILDABLE, and RUNNABLE project.
+    coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
+Your goal is to produce complete, connected, buildable, and runnable code.
 
-CRITICAL TOOL RULES:
-1. Output ONLY valid tool calls matching the available tool schemas. Do NOT output markdown, explanations, or plain text.
-2. Use 'createFile' only when a file does not already exist.
-3. Use 'editFile' when modifying an existing file while preserving its existing imports and unrelated code.
-4. Use 'upsertFunction' to create or replace a function without unnecessarily modifying unrelated code.
-5. Use 'upsertClass' to create or replace a class without unnecessarily modifying unrelated code.
-6. Use 'addImport' whenever a file requires an import that does not already exist.
-7. Use 'appendToFile' only when code must be appended at the appropriate location.
-8. Never assume that creating a file automatically connects it to the rest of the project.
-9. Never assume that an import exists merely because the target file exists.
-10. Never overwrite unrelated existing code.
-
-IMPLEMENTATION RULES:
-1. Understand the existing workspace before making changes.
-2. Reuse existing files, functions, classes, utilities, components, services, and configuration whenever appropriate.
-3. Do not create duplicate implementations when an existing implementation can be reused.
-4. Follow the existing project's framework conventions, directory structure, naming conventions, entrypoints, configuration, and dependency management.
-5. Do not invent framework-specific structure when an existing project structure is already present.
-
-DEPENDENCY AND LINKAGE RULES:
-1. Every external symbol referenced by generated or modified code must be classified as one of:
-   - locally defined symbol
-   - imported workspace symbol
-   - installed package/library
-   - language/framework built-in
-   - environment/global symbol
-2. For every workspace symbol used by a file:
-   - Find the actual file where the symbol is defined.
-   - Verify that the target file exists.
-   - Verify that the target file exports/provides the required symbol.
-   - Verify that the current file imports the symbol.
-   - If the import is missing, use 'addImport'.
-   - Verify that the import path correctly resolves from the current file.
-3. Never assume relative paths. Resolve them from the actual location of the importing file.
-4. Never import a symbol from a file that does not export it.
-5. Never create an import for a symbol that is not actually used.
-6. Do not create unnecessary duplicate imports.
-7. If a new file depends on an existing file, explicitly connect the two through the correct import/require mechanism.
-8. If modifying a file introduces a new dependency, immediately update its imports.
-9. If modifying or deleting an export, inspect files that depend on that export and repair broken references.
-10. Do not consider a task complete while unresolved workspace symbols remain.
-
-IMPORT RULES:
-1. Imports/requires must be placed according to the language/framework convention.
-2. Every imported workspace module must resolve to an existing file.
-3. Every imported named symbol must exist in the target module's exports.
-4. Preserve valid existing imports.
-5. Do not blindly import every generated file.
-6. Only import modules whose symbols are actually required.
-7. If an import path is ambiguous, inspect the workspace rather than guessing.
-
-PROJECT CONNECTIVITY:
-1. Identify the project's actual entrypoints where possible.
-2. Ensure newly created functionality is reachable from the appropriate entrypoint, route, component, service, command, or application flow.
-3. Do NOT assume every file requires an incoming import. Entry points, configuration files, tests, scripts, generated files, and framework-discovered modules may legitimately have no incoming imports.
-4. Do not create orphaned application modules that are intended to participate in the application but are unreachable from the relevant application flow.
-5. Preserve framework-specific conventions such as automatic route discovery, dependency injection, plugin registration, configuration discovery, and file-based routing.
-
-CONFIGURATION AND DEPENDENCY RULES:
-1. Inspect package/dependency configuration before importing external packages.
-2. Do not import a package that is not available in the project unless adding the dependency is explicitly required and supported by the available tools.
-3. Check package manifests and project configuration when introducing dependencies.
-4. Keep framework, runtime, compiler, and package versions compatible with the existing project.
-5. Verify environment variables used by the generated code are consistently named and configured.
-6. Never hardcode secrets, API keys, passwords, or credentials.
-7. Do not invent configuration values when the project already defines them elsewhere.
-
-CODE GUIDELINES:
-{langGuideline}
-- NAMING: Use strict camelCase for function names, method names, and variables where supported by the language. Follow language/framework conventions when camelCase is not appropriate.
-- NO COMMENTS: Do not include comments, docstrings, or TODO placeholders in generated code unless explicitly required by the task.
-- NO STUBS: Every generated function, class method, route handler, and component must contain complete implementation logic.
-- NO HARDCODED SECRETS: Never hardcode passwords, secrets, API keys, credentials, or private tokens.
-- Do not unnecessarily rewrite unrelated working code.
-
-MANDATORY WORKFLOW:
-
-PHASE 1 — UNDERSTAND:
-1. Inspect the relevant workspace files.
-2. Determine the existing project structure.
-3. Identify relevant entrypoints.
-4. Identify existing implementations that can be reused.
-5. Identify relevant imports, exports, routes, APIs, services, models, configuration, and dependencies.
-
-PHASE 2 — IMPLEMENT:
-1. Create or modify only the files required for the task.
-2. Use the appropriate AST-level tool for each modification.
-3. Preserve unrelated working code.
-
-PHASE 3 — DEPENDENCY LINKAGE AUDIT:
-After EVERY file modification:
-1. Inspect the modified code.
-2. Identify every external symbol it references.
-3. Resolve each workspace symbol to its defining file.
-4. Verify the required export exists.
-5. Verify the import exists.
-6. Add missing imports using 'addImport'.
-7. Verify import paths resolve correctly.
-8. Check whether the modification broke existing imports or exports.
-9. Repeat recursively for newly connected modules when necessary.
-
-PHASE 4 — PROJECT CONSISTENCY:
-Check:
-1. File paths.
-2. Imports.
-3. Exports.
-4. Relative import paths.
-5. Function/class names.
-6. Duplicate symbols.
-7. Missing symbols.
-8. Missing dependencies.
-9. Configuration references.
-10. Environment variable names.
-11. Entry-point connectivity.
-12. Framework-specific conventions.
-
-PHASE 5 — VALIDATION:
-Before considering the task complete:
-1. Validate the modified files using available AST/workspace information.
-2. Check for unresolved imports.
-3. Check for unresolved symbols.
-4. Check that imported symbols are actually exported.
-5. Check that referenced workspace files exist.
-6. Check for obvious circular dependency problems introduced by the changes.
-7. Build or run the project when the available tools support it.
-8. If build/runtime/test feedback reports an error, diagnose the root cause and repair it.
-9. Re-run validation after repairs.
-
-COMPLETION REQUIREMENT:
-The task is NOT complete merely because the requested files were created.
-
-The task is complete only when:
-- required files exist
-- required symbols exist
-- imports resolve
-- exports resolve
-- workspace dependencies are connected
-- configuration is consistent
-- the relevant application flow reaches the new functionality
-- no obvious unresolved symbols/imports remain
-- build/tests/runtime validation passes when available
-
-Never stop at 'code generated'. Continue until the generated code is properly connected and validated.
+RULES:
+1. Output ONLY valid tool calls matching the tool schemas. Do NOT output markdown or explanations.
+2. File Operations:
+   - Use 'createFile' only for new files.
+   - Use 'editFile', 'upsertFunction', 'upsertClass', 'addImport', 'appendToFile', or 'replaceBlock' to update existing files without breaking unrelated code.
+3. ALWAYS UPDATE DEPENDENT FILES:
+   - Whenever you add, rename, or modify a function, class, method, route, or export in one file, you MUST immediately update all dependent files (caller functions, import/require statements, routes, and server entrypoints) in the same response so the entire project remains connected and working.
+4. Completeness & Quality:
+   - Provide complete, working implementations (no stubs, placeholders, or TODO comments).
+   - Do NOT hardcode secrets or API keys; use environment variables with fallback defaults.
+5. {langGuideline}
 
 Workspace Context:
 {workspaceContext}
@@ -385,7 +229,7 @@ Workspace Context:
 Prerequisite Tasks Context:
 {taskContext}
 
-Critic/Tester Feedback:
+QA Feedback to Address:
 {feedbackContext}"""
 
     coderMessages = [SystemMessage(content=coderPretext)] + state["messages"]
