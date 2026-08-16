@@ -84,6 +84,8 @@ class Scheduler:
                 except Exception:
                     continue
 
+        return "\n\n".join(parts)
+
     def scaffoldWorkspace(self) -> None:
         self.workDir.mkdir(parents=True, exist_ok=True)
         files = [f for f in self.workDir.glob("*") if f.is_file() and not f.name.startswith(".")]

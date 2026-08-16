@@ -4,7 +4,6 @@ from agents.models import dagPlan, taskNode, deliverable
 
 
 class dagVisualizer:
-
     def __init__(self, plan: dagPlan):
         self.plan = plan
         self.deliverableById: Dict[str, deliverable] = {d.id: d for d in plan.deliverables}
@@ -40,14 +39,14 @@ class dagVisualizer:
         for delivId, taskList in self.tasksByDeliverable.items():
             delivName = self.deliverableById[delivId].name if delivId in self.deliverableById else delivId
             safeDelivId = delivId.replace("-", "_")
-            lines.append(f"    subgraph cluster_{safeDelivId} {{")
-            lines.append(f'        label="{delivName}";')
-            lines.append('        style=dashed;')
+            lines.append(f"subgraph cluster_{safeDelivId} {{")
+            lines.append(f'label="{delivName}";')
+            lines.append('style=dashed;')
             for task in taskList:
                 safeTaskId = task.id.replace("-", "_")
                 label = task.objective.replace('"', "'")
                 lines.append(f'        {safeTaskId} [label="{label}"];')
-            lines.append("    }")
+            lines.append("}")
 
         for task in self.plan.taskNodes:
             safeTaskId = task.id.replace("-", "_")
@@ -59,7 +58,6 @@ class dagVisualizer:
         return "\n".join(lines)
 
     def toTextTree(self) -> str:
-
         lines = ["DAG VISUALIZATION"]
 
         for d in self.plan.deliverables:
@@ -75,7 +73,6 @@ class dagVisualizer:
         return "\n".join(lines)
 
     def toMarkdown(self) -> str:
-
         lines = [
             "# KAIZEN Plan & DAG Execution Flow",
             "",
@@ -94,29 +91,29 @@ class dagVisualizer:
 
         for d in self.plan.deliverables:
             deps = ", ".join(d.dependencies) if d.dependencies else "None"
-            lines.append(f"\n### Deliverable: `{d.name}` (`{d.id}`)")
-            lines.append(f"- **Kind**: `{d.kind}`")
-            lines.append(f"- **Goal**: {d.goal}")
-            lines.append(f"- **Priority**: `{d.priority}`")
-            lines.append(f"- **Deliverable Dependencies**: `{deps}`")
-            lines.append("- **Tasks**:")
+            lines.append(f"\nDeliverable: `{d.name}` (`{d.id}`)")
+            lines.append(f"- Kind: `{d.kind}`")
+            lines.append(f"- Goal: {d.goal}")
+            lines.append(f"- Priority: `{d.priority}`")
+            lines.append(f"- Deliverable Dependencies: `{deps}`")
+            lines.append("- Tasks: ")
 
             taskList = self.tasksByDeliverable.get(d.id, [])
             if not taskList:
                 lines.append("  - *(No tasks)*")
             for indexVal, t in enumerate(taskList, start=1):
                 tdeps = ", ".join(t.dependencies) if t.dependencies else "None"
-                lines.append(f"  {indexVal}. **{t.objective}** (`{t.id}`)")
-                lines.append(f"     - Output: `{t.output}`")
-                lines.append(f"     - Completion Criteria: {t.completionCriteria}")
-                lines.append(f"     - Task Dependencies: `{tdeps}`")
+                lines.append(f"{indexVal}. **{t.objective}** (`{t.id}`)")
+                lines.append(f"- Output: `{t.output}`")
+                lines.append(f"- Completion Criteria: {t.completionCriteria}")
+                lines.append(f"- Task Dependencies: `{tdeps}`")
 
         lines.extend([
             "",
-            "## Execution Schedule Table",
+            "Execution Schedule Table",
             "",
             "| Priority | Task ID | Deliverable | Objective | Dependencies |",
-            "| --- | --- | --- | --- | --- |",
+            "",
         ])
 
         for t in self.plan.taskNodes:
@@ -127,7 +124,6 @@ class dagVisualizer:
         return "\n".join(lines)
 
     def saveVisualization(self, outputDirectory: str = ".", baseFilename: str = "dag_plan") -> Dict[str, str]:
-
         os.makedirs(outputDirectory, exist_ok=True)
         fileFormats = {
             "mermaid": (f"{baseFilename}.mmd", self.toMermaid()),
@@ -147,6 +143,6 @@ class dagVisualizer:
 
 
 def visualizeDag(plan: dagPlan, outputDirectory: str = ".", baseFilename: str = "dag_plan") -> Dict[str, str]:
-
     visualizer = dagVisualizer(plan)
     return visualizer.saveVisualization(outputDirectory, baseFilename)
+

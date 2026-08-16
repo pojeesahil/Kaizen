@@ -2,17 +2,6 @@ import re
 from typing import List, Dict, Any
 from agents.models import Deliverable, newId
 
-def dedupe(items: List[Any]) -> List[str]:
-    seen = set()
-    result = []
-    for item in items:
-        name = item.get("name", str(item)) if isinstance(item, dict) else str(item)
-        key = name.strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            result.append(name.strip())
-    return result
-
 class DeliverableDetector:
 
     def detect(self, promptAgentOutput: Dict[str, Any]) -> List[Deliverable]:
@@ -59,13 +48,13 @@ class DeliverableDetector:
 
             deliverables.append(
                 Deliverable(
-                    id=deliverableId,
-                    name=name,
-                    kind=kind,
-                    goal=goal,
-                    requirements=[str(r) for r in requirements],
-                    dependencies=[str(d) for d in dependencies],
-                    priority=priority,
+                    id = deliverableId,
+                    name = name,
+                    kind = kind,
+                    goal = goal,
+                    requirements = [str(r) for r in requirements],
+                    dependencies = [str(d) for d in dependencies],
+                    priority = priority,
                 )
             )
 

@@ -75,8 +75,12 @@ def executeToolCalls(response, toolsList):
     if hasattr(response, "tool_calls") and response.tool_calls:
         for tc in response.tool_calls:
             tname = tc.get("name")
+            if isinstance(tname, dict):
+                tname = tname.get("name")
             targs = tc.get("args", {})
-            if tname in toolMap:
+            if not isinstance(targs, dict):
+                targs = {}
+            if isinstance(tname, str) and tname in toolMap:
                 try:
                     if tname == "executeCommand" and "command" in targs:
                         targs["command"] = sanitizeCommand(targs["command"])
@@ -108,8 +112,17 @@ def executeToolCalls(response, toolsList):
 
             if data and isinstance(data, dict):
                 tname = data.get("name")
+                if isinstance(tname, dict):
+                    tname = tname.get("name") or tname.get("function", {}).get("name")
                 targs = data.get("arguments") or data.get("args") or {}
-                if tname in toolMap:
+                if isinstance(targs, str):
+                    try:
+                        targs = json.loads(targs)
+                    except Exception:
+                        targs = {}
+                if not isinstance(targs, dict):
+                    targs = {}
+                if isinstance(tname, str) and tname in toolMap:
                     try:
                         if tname == "executeCommand" and "command" in targs:
                             targs["command"] = sanitizeCommand(targs["command"])

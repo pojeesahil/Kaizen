@@ -6,33 +6,34 @@ class dependencyResolver:
     def resolve(self, deliverablesList: List[deliverable]) -> List[deliverable]:
         idSet = {d.id for d in deliverablesList}
 
-        llmIdToActualMap: Dict[str, str] = {}
+        LLMidToActualMap: Dict[str, str] = {}
         for d in deliverablesList:
             parts = d.id.rsplit("-", 1)
             if len(parts) == 2:
-                llmIdToActualMap[parts[0]] = d.id
-            llmIdToActualMap[d.id] = d.id
+                LLMidToActualMap[parts[0]] = d.id
 
-        codeDeliverableIds = [
-            d.id for d in deliverablesList
-            if not any(k in d.kind.lower() or k in d.name.lower() for k in ("readme", "doc", "documentation"))
-        ]
+        def isDoc(item: deliverable) -> bool:
+            return any(
+                k in item.kind.lower() or k in item.name.lower()
+                for k in ("readme", "doc", "documentation")
+            )
+
+        codeDeliverableIds = [d.id for d in deliverablesList if not isDoc(d)]
 
         for d in deliverablesList:
-            remappedDeps = []
-            for depId in d.dependencies:
-                actualId = llmIdToActualMap.get(depId)
-                if actualId:
-                    remappedDeps.append(actualId)
+            remappedDeps = [
+                LLMidToActualMap[depId]
+                for depId in d.dependencies
+                if depId in LLMidToActualMap
+            ]
 
-            # Documentation/README must strictly depend on all code deliverables
-            isDoc = any(k in d.kind.lower() or k in d.name.lower() for k in ("readme", "doc", "documentation"))
-            if isDoc and codeDeliverableIds:
+            if isDoc(d) and codeDeliverableIds:
                 remappedDeps.extend([cid for cid in codeDeliverableIds if cid != d.id])
 
-            d.dependencies = self.dedupe(remappedDeps)
-            d.dependencies = [dep for dep in d.dependencies if dep != d.id]
-            d.dependencies = [dep for dep in d.dependencies if dep in idSet]
+            d.dependencies = [
+                dep for dep in self.dedupe(remappedDeps)
+                if dep != d.id and dep in idSet
+            ]
 
         self.breakCycles(deliverablesList)
         self.alignPriorities(deliverablesList)
@@ -44,7 +45,7 @@ class dependencyResolver:
         colorMap: Dict[str, int] = {d.id: whiteState for d in deliverablesList}
         backEdges: List[tuple] = []
 
-        def dfsTraversal(nodeId: str) -> None:
+        def DFStraversal(nodeId: str) -> None:
             colorMap[nodeId] = greyState
             for neighborId in graphMap.get(nodeId, []):
                 if neighborId not in colorMap:
@@ -52,12 +53,12 @@ class dependencyResolver:
                 if colorMap[neighborId] == greyState:
                     backEdges.append((nodeId, neighborId))
                 elif colorMap[neighborId] == whiteState:
-                    dfsTraversal(neighborId)
+                    DFStraversal(neighborId)
             colorMap[nodeId] = blackState
 
         for d in deliverablesList:
             if colorMap[d.id] == whiteState:
-                dfsTraversal(d.id)
+                DFStraversal(d.id)
 
         if backEdges:
             byId = {d.id: d for d in deliverablesList}
@@ -80,13 +81,8 @@ class dependencyResolver:
 
     @staticmethod
     def dedupe(idsList: List[str]) -> List[str]:
-        seenSet: Set[str] = set()
-        resultList = []
-        for item in idsList:
-            if item not in seenSet:
-                seenSet.add(item)
-                resultList.append(item)
-        return resultList
+        return list(dict.fromkeys(idsList))
 
 
 DependencyResolver = dependencyResolver
+

@@ -110,14 +110,14 @@ class DeliverablePlanner:
             taskId = newId(f"{deliverable.id}-t{index}")
             isLast = index == len(llmTasks)
             task = TaskNode(
-                id=taskId,
-                deliverableId=deliverable.id,
-                objective=llmTask["objective"],
-                output=llmTask.get("output", deliverable.name if isLast else f"step {index} for {deliverable.name}"),
-                completionCriteria=llmTask.get("completion_criteria", self.completionCriteria(llmTask["objective"], deliverable, isLast)),
-                parentTask=previousId,
-                dependencies=[previousId] if previousId else [],
-                priority=priority
+                id = taskId,
+                deliverableId = deliverable.id,
+                objective = llmTask["objective"],
+                output = llmTask.get("output", deliverable.name if isLast else f"step {index} for {deliverable.name}"),
+                completionCriteria = llmTask.get("completion_criteria", self.completionCriteria(llmTask["objective"], deliverable, isLast)),
+                parentTask = previousId,
+                dependencies = [previousId] if previousId else [],
+                priority = priority
             )
             if previousId:
                 attachChild(tasks, previousId, taskId)
