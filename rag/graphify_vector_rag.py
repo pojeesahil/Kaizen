@@ -62,7 +62,7 @@ class GraphifyVectorRAG(RAGInterface):
     def retrieve_candidates(self, query, top_k=15):
         """Retrieve a wider set of initial candidates for reranking."""
         results = []
-        seen = set()
+        seen = set() #prevents duplication of results   
 
         for r in self.vector_store.search(query, top_k=top_k):
             results.append(r)
@@ -123,4 +123,3 @@ if __name__ == "__main__":
     rag = GraphifyVectorRAG()
     rag.index_codebase(".")
     print(rag.get_context_for_agent("retrieve search", top_k=2))
-
