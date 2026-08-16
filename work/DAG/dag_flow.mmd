@@ -1,31 +1,23 @@
 flowchart TD
-subgraph sub_coreLogic_a6ae79 ["Core Game Logic"]
-coreLogic_a6ae79_t1_2c4dbb["Implement snake movement control logic."]
-coreLogic_a6ae79_t2_dedd9d["Implement food generation logic."]
-coreLogic_a6ae79_t3_944761["Implement collision detection and scoring logic."]
+subgraph sub_coreLogic_5083b1 ["Core Game Logic"]
+coreLogic_5083b1_t1_9f6dc3["Implement snake movement control logic."]
+coreLogic_5083b1_t2_b15221["Implement food generation logic."]
+coreLogic_5083b1_t3_686b0b["Implement collision detection logic."]
+coreLogic_5083b1_t4_b835bc["Implement scoring logic."]
 end
-subgraph sub_gameUi_0ff351 ["Game User Interface"]
-gameUi_0ff351_t1_50d335["Create a new React component for the game board."]
-gameUi_0ff351_t2_dd85d6["Implement snake rendering in the game board component."]
-gameUi_0ff351_t3_59a347["Add food rendering functionality to the game board component."]
-gameUi_0ff351_t4_827141["Create a function to display the score in the game board component."]
+subgraph sub_gameUi_832f05 ["Game User Interface"]
+gameUi_832f05_t1_88f00f["Create a new React component for the Snake game UI."]
+gameUi_832f05_t2_7dead7["Implement the logic to display the snake on the screen."]
+gameUi_832f05_t3_ec02a2["Add functionality to display the score and game over screen."]
 end
-subgraph sub_mainLoop_735ece ["Game Main Loop"]
-mainLoop_735ece_t1_a6c466["Create a new file named `game_loop.js` to encapsulate the game's main loop logic."]
-mainLoop_735ece_t2_e536c7["Implement the game loop function in `game_loop.js` to handle frame updates and rendering."]
+subgraph sub_readme_c307e9 ["Project Documentation"]
+readme_c307e9_t1_77c810["Create a README.md file in the project root directory."]
 end
-subgraph sub_readme_48bd61 ["Project Documentation"]
-readme_48bd61_t1_dcee23["Create a README.md file in the project root directory."]
-end
-coreLogic_a6ae79_t1_2c4dbb --> coreLogic_a6ae79_t2_dedd9d
-coreLogic_a6ae79_t2_dedd9d --> coreLogic_a6ae79_t3_944761
-coreLogic_a6ae79_t3_944761 --> gameUi_0ff351_t1_50d335
-gameUi_0ff351_t1_50d335 --> gameUi_0ff351_t2_dd85d6
-gameUi_0ff351_t2_dd85d6 --> gameUi_0ff351_t3_59a347
-gameUi_0ff351_t3_59a347 --> gameUi_0ff351_t4_827141
-coreLogic_a6ae79_t3_944761 --> mainLoop_735ece_t1_a6c466
-gameUi_0ff351_t4_827141 --> mainLoop_735ece_t1_a6c466
-mainLoop_735ece_t1_a6c466 --> mainLoop_735ece_t2_e536c7
-coreLogic_a6ae79_t3_944761 --> readme_48bd61_t1_dcee23
-gameUi_0ff351_t4_827141 --> readme_48bd61_t1_dcee23
-mainLoop_735ece_t2_e536c7 --> readme_48bd61_t1_dcee23
+coreLogic_5083b1_t1_9f6dc3 --> coreLogic_5083b1_t2_b15221
+coreLogic_5083b1_t2_b15221 --> coreLogic_5083b1_t3_686b0b
+coreLogic_5083b1_t3_686b0b --> coreLogic_5083b1_t4_b835bc
+coreLogic_5083b1_t4_b835bc --> gameUi_832f05_t1_88f00f
+gameUi_832f05_t1_88f00f --> gameUi_832f05_t2_7dead7
+gameUi_832f05_t2_7dead7 --> gameUi_832f05_t3_ec02a2
+coreLogic_5083b1_t4_b835bc --> readme_c307e9_t1_77c810
+gameUi_832f05_t3_ec02a2 --> readme_c307e9_t1_77c810
