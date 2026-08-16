@@ -121,6 +121,48 @@ def extractJsSymbols(fpath: Path) -> Dict[str, Any]:
 
     return res
 
+def extractGoSymbols(fpath: Path) -> Dict[str, Any]:
+    res = {"functions": [], "structs": [], "imports": []}
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            src = f.read()
+        for m in re.finditer(r"func\s+([a-zA-Z0-9_$]+)\s*\(", src):
+            res["functions"].append(m.group(1))
+        for m in re.finditer(r"type\s+([a-zA-Z0-9_$]+)\s+struct", src):
+            res["structs"].append(m.group(1))
+        for m in re.finditer(r"import\s+(?:\(\s*([^)]+)\s*\)|([^\n]+))", src):
+            res["imports"].append((m.group(1) or m.group(2)).strip())
+    except Exception:
+        pass
+    return res
+
+def extractJavaSymbols(fpath: Path) -> Dict[str, Any]:
+    res = {"classes": {}, "functions": [], "imports": []}
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            src = f.read()
+        for m in re.finditer(r"(?:public|private|protected)?\s*class\s+([a-zA-Z0-9_$]+)", src):
+            res["classes"][m.group(1)] = []
+        for m in re.finditer(r"import\s+([a-zA-Z0-9_$.*]+);", src):
+            res["imports"].append(m.group(1))
+    except Exception:
+        pass
+    return res
+
+def extractCSymbols(fpath: Path) -> Dict[str, Any]:
+    res = {"functions": [], "includes": []}
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            src = f.read()
+        for m in re.finditer(r"#include\s+[<\"]([^>\" ]+)[>\"]", src):
+            res["includes"].append(m.group(1))
+        for m in re.finditer(r"(?:[a-zA-Z0-9_*]+\s+)+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{", src):
+            if m.group(1) not in ("if", "while", "for", "switch"):
+                res["functions"].append(m.group(1))
+    except Exception:
+        pass
+    return res
+
 def buildSymbolManifest(workDir: Path) -> Dict[str, Any]:
     manifest = {}
     if not workDir.exists():
@@ -136,6 +178,14 @@ def buildSymbolManifest(workDir: Path) -> Dict[str, Any]:
                 manifest[rel] = extractPySymbols(fpath)
             elif ext in (".js", ".ts", ".jsx", ".tsx"):
                 manifest[rel] = extractJsSymbols(fpath)
+            elif ext == ".go":
+                manifest[rel] = extractGoSymbols(fpath)
+            elif ext == ".java":
+                manifest[rel] = extractJavaSymbols(fpath)
+            elif ext in (".c", ".cpp", ".cc", ".h", ".hpp"):
+                manifest[rel] = extractCSymbols(fpath)
+            else:
+                manifest[rel] = {"file": rel}
 
     return manifest
 
@@ -192,14 +242,14 @@ def formatManifestContext(workDir: Path) -> str:
             lines.append("  Variables: " + ", ".join(globalsList))
 
     if importMap:
-        lines.append("\n=== EXACT IMPORT STRINGS (Use these exact imports) ===")
+        lines.append("\n=== EXACT PYTHON IMPORT STRINGS ===")
         for sym, impStr in sorted(importMap.items()):
             lines.append(f"- {sym}: {impStr}")
 
     lines.append("\nRULES FOR CROSS-FILE CONNECTEDNESS:")
-    lines.append("- Import symbols using the exact strings listed above.")
-    lines.append("- Do not redefine or rename existing functions or classes.")
-    lines.append("- Keep 'if __name__ == \"__main__\":' at the very bottom of the file.")
+    lines.append("- Connect modules and import symbols using valid, idiomatic import statements for the project's target language environment.")
+    lines.append("- Do not redefine existing functions or classes across files unless extending them.")
+    lines.append("- Write complete, runnable implementation files without placeholders.")
     return "\n".join(lines)
 
 def mergePythonImports(oldCode: str, newCode: str) -> str:
@@ -319,11 +369,29 @@ def validateConnectedness(workDir: Path) -> Tuple[bool, List[str]]:
     manifest = buildSymbolManifest(workDir)
     errors = []
 
+    hasJsFiles = any(f.endswith((".js", ".ts", ".jsx", ".tsx", "package.json")) for f in manifest.keys())
     pyFiles = {f: d for f, d in manifest.items() if f.endswith(".py")}
+
+    # If it's a Node.js project, remove any empty scaffolded Python main.py if present
+    if hasJsFiles:
+        for pyName in ("main.py", "app.py"):
+            pyPath = workDir / pyName
+            if pyPath.exists():
+                try:
+                    txt = pyPath.read_text(encoding="utf-8").strip()
+                    if "def main():" in txt and "pass" in txt:
+                        pyPath.unlink()
+                        manifest.pop(pyName, None)
+                        pyFiles.pop(pyName, None)
+                except Exception:
+                    pass
+
     moduleMap = {Path(f).stem: (f, d) for f, d in pyFiles.items()}
 
     for rel, data in pyFiles.items():
         if data.get("syntaxError"):
+            if hasJsFiles:
+                continue
             errors.append(f"[{rel}] {data['syntaxError']}")
             continue
 

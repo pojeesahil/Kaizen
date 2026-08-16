@@ -9,6 +9,7 @@ TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down t
 RULES:
 - Do NOT generate fragmented micro-tasks. Group cohesive logic together.
 - Focus strictly on concrete source files and functions needed for this deliverable.
+- Do NOT generate tasks for environment setup, installing tools (e.g. Node.js, npm, Python), running package installs, or creating directories. Focus exclusively on creating/updating source code files.
 
 Deliverable: {name}
 Kind: {kind}
@@ -50,6 +51,12 @@ def parseLLMjson(text: str) -> Any:
 
 parseLlmJson = parseLLMjson
 
+INVALID_TASK_PATTERNS = (
+    "install node", "install npm", "install python", "install express", "install dependency",
+    "create directory", "create folder", "create a new directory", "initialize project", "init npm",
+    "start the server", "launch server", "run the server", "run server"
+)
+
 def validateTasks(data) -> List[dict]:
     if not isinstance(data, dict) or "tasks" not in data:
         return []
@@ -60,10 +67,14 @@ def validateTasks(data) -> List[dict]:
     for item in rawList:
         if not isinstance(item, dict):
             continue
-        if "objective" not in item:
+        obj = str(item.get("objective", "")).strip()
+        if not obj:
+            continue
+        objLower = obj.lower()
+        if any(pat in objLower for pat in INVALID_TASK_PATTERNS):
             continue
         validTasks.append({
-            "objective": str(item["objective"]).strip(),
+            "objective": obj,
             "output": str(item.get("output", "")).strip(),
             "completion_criteria": str(item.get("completion_criteria", "")).strip(),
         })

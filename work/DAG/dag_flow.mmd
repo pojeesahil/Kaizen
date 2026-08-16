@@ -1,0 +1,24 @@
+flowchart TD
+subgraph sub_server_637e2c ["Server Setup"]
+server_637e2c_t1_411ec9["Initialize a new Node.js project."]
+server_637e2c_t2_515476["Create an index.js file for the server logic."]
+server_637e2c_t3_853ccd["Write basic Express server code."]
+end
+subgraph sub_routes_ca6b7f ["Contact Form Routes"]
+routes_ca6b7f_t1_95ca48["Create a new file for handling contact form routes."]
+routes_ca6b7f_t2_1b5a9d["Define a route to handle POST requests for contact form submissions."]
+routes_ca6b7f_t3_32faf9["Implement logic to process the submitted contact form data."]
+end
+subgraph sub_controller_873f4f ["Contact Form Controller"]
+controller_873f4f_t1_18c3fe["Create a new file for the contact form controller."]
+controller_873f4f_t2_c4b7db["Define a route to handle contact form submissions."]
+controller_873f4f_t3_7bc829["Implement logic to process contact form submissions."]
+end
+server_637e2c_t1_411ec9 --> server_637e2c_t2_515476
+server_637e2c_t2_515476 --> server_637e2c_t3_853ccd
+server_637e2c_t3_853ccd --> routes_ca6b7f_t1_95ca48
+routes_ca6b7f_t1_95ca48 --> routes_ca6b7f_t2_1b5a9d
+routes_ca6b7f_t2_1b5a9d --> routes_ca6b7f_t3_32faf9
+routes_ca6b7f_t3_32faf9 --> controller_873f4f_t1_18c3fe
+controller_873f4f_t1_18c3fe --> controller_873f4f_t2_c4b7db
+controller_873f4f_t2_c4b7db --> controller_873f4f_t3_7bc829

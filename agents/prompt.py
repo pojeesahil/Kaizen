@@ -9,6 +9,7 @@ CRITICAL RULES:
 - Group all related functions, state, and logic into cohesive, file-level deliverables (e.g. "Game Engine / Logic", "Interactive UI / Main Loop", "Documentation").
 - NEVER create fragmented micro-deliverables (e.g. do NOT create separate deliverables for score, collision, movement, etc. — combine them into the core logic deliverable).
 - Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly requested.
+- NEVER create deliverables for environment setup, runtime/package installation (e.g. "Install Node.js", "Install npm"), or creating directories. Focus strictly on source code deliverables.
 - For games, terminal apps, or CLI tools, specify a concrete, runnable framework (e.g. curses, turtle, tkinter, pygame, or rich).
 
 For each deliverable, provide:
