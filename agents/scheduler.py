@@ -5,7 +5,7 @@ from pathlib import Path
 from agents.dag import DAG
 from rag.rag import indexWorkspace
 from main import runBatchEval
- from main import runCoder
+from main import runCoder
 
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
 
