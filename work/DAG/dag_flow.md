@@ -1,101 +1,63 @@
 # KAIZEN Plan & DAG Execution Flow
 
 ## Overview
-- **Deliverables Count**: 3
-- **Tasks Count**: 8
+- **Deliverables Count**: 2
+- **Tasks Count**: 4
 
 ## DAG Dependency Diagram
 
 ```mermaid
 flowchart TD
-subgraph sub_coreLogic_5083b1 ["Core Game Logic"]
-coreLogic_5083b1_t1_9f6dc3["Implement snake movement control logic."]
-coreLogic_5083b1_t2_b15221["Implement food generation logic."]
-coreLogic_5083b1_t3_686b0b["Implement collision detection logic."]
-coreLogic_5083b1_t4_b835bc["Implement scoring logic."]
+subgraph sub_snakeGameHtml_a70390 ["Single-File HTML5 Snake Game"]
+snakeGameHtml_a70390_t1_1613dd["Create the single-file HTML structure and responsive CSS styling to center the game board and style the score displays."]
+snakeGameHtml_a70390_t2_c6ada0["Implement the complete JavaScript game engine within the HTML file, including the game loop, keyboard input handling, collision detection, food spawning, and localStorage score persistence."]
 end
-subgraph sub_gameUi_832f05 ["Game User Interface"]
-gameUi_832f05_t1_88f00f["Create a new React component for the Snake game UI."]
-gameUi_832f05_t2_7dead7["Implement the logic to display the snake on the screen."]
-gameUi_832f05_t3_ec02a2["Add functionality to display the score and game over screen."]
+subgraph sub_readme_50e9cf ["Documentation and Play Guide"]
+readme_50e9cf_t1_e33fb1["Create the user-facing play guide in README.md detailing browser launch instructions, control schemes (Arrow keys/WASD), and core gameplay mechanics."]
+readme_50e9cf_t2_88cd1c["Document the technical architecture in README.md, detailing the game loop, state management, and rendering logic to guide future customization."]
 end
-subgraph sub_readme_c307e9 ["Project Documentation"]
-readme_c307e9_t1_77c810["Create a README.md file in the project root directory."]
-end
-coreLogic_5083b1_t1_9f6dc3 --> coreLogic_5083b1_t2_b15221
-coreLogic_5083b1_t2_b15221 --> coreLogic_5083b1_t3_686b0b
-coreLogic_5083b1_t3_686b0b --> coreLogic_5083b1_t4_b835bc
-coreLogic_5083b1_t4_b835bc --> gameUi_832f05_t1_88f00f
-gameUi_832f05_t1_88f00f --> gameUi_832f05_t2_7dead7
-gameUi_832f05_t2_7dead7 --> gameUi_832f05_t3_ec02a2
-coreLogic_5083b1_t4_b835bc --> readme_c307e9_t1_77c810
-gameUi_832f05_t3_ec02a2 --> readme_c307e9_t1_77c810
+snakeGameHtml_a70390_t1_1613dd --> snakeGameHtml_a70390_t2_c6ada0
+snakeGameHtml_a70390_t2_c6ada0 --> readme_50e9cf_t1_e33fb1
+readme_50e9cf_t1_e33fb1 --> readme_50e9cf_t2_88cd1c
 ```
 
 ## Deliverables and Task Details
 
-Deliverable: `Core Game Logic` (`coreLogic-5083b1`)
-- Kind: `core_logic`
-- Goal: Implement the core logic for the Snake game, including movement, collision detection, and scoring.
+Deliverable: `Single-File HTML5 Snake Game` (`snakeGameHtml-a70390`)
+- Kind: `source_code`
+- Goal: A complete, self-contained HTML5 file containing the Canvas element, CSS styling, and JavaScript game loop for the Snake game.
 - Priority: `1`
 - Deliverable Dependencies: `None`
 - Tasks: 
-1. **Implement snake movement control logic.** (`coreLogic-5083b1-t1-9f6dc3`)
-- Output: `A function `moveSnake(direction)` in `snake_logic.js` that updates the snake's position based on user input or automatic movement.`
-- Completion Criteria: The snake moves correctly in all four directions (up, down, left, right) and stops when it collides with walls.
+1. **Create the single-file HTML structure and responsive CSS styling to center the game board and style the score displays.** (`snakeGameHtml-a70390-t1-1613dd`)
+- Output: `index.html containing the HTML skeleton, canvas element, score UI, and CSS styles.`
+- Completion Criteria: Opening index.html in a browser displays a visually centered, responsive game container with a styled canvas and scoreboards.
 - Task Dependencies: `None`
-2. **Implement food generation logic.** (`coreLogic-5083b1-t2-b15221`)
-- Output: `A function `generateFood()` in `game_logic.js` that randomly places food on the game board.`
-- Completion Criteria: Food appears at a random position on the board, and it does not overlap with the snake.
-- Task Dependencies: `coreLogic-5083b1-t1-9f6dc3`
-3. **Implement collision detection logic.** (`coreLogic-5083b1-t3-686b0b`)
-- Output: `A function `checkCollisions()` in `collision_logic.js` that detects collisions between the snake and walls or itself.`
-- Completion Criteria: The game correctly identifies when the snake collides with the wall or itself, triggering appropriate actions.
-- Task Dependencies: `coreLogic-5083b1-t2-b15221`
-4. **Implement scoring logic.** (`coreLogic-5083b1-t4-b835bc`)
-- Output: `A function `updateScore()` in `score_logic.js` that increments the score when the snake consumes food.`
-- Completion Criteria: The score increases by a predefined amount each time the snake eats food, and it resets to zero when the game ends.
-- Task Dependencies: `coreLogic-5083b1-t3-686b0b`
+2. **Implement the complete JavaScript game engine within the HTML file, including the game loop, keyboard input handling, collision detection, food spawning, and localStorage score persistence.** (`snakeGameHtml-a70390-t2-c6ada0`)
+- Output: `index.html updated with a script tag containing functions for init(), gameLoop(), update(), draw(), spawnFood(), handleInput(), and checkCollision().`
+- Completion Criteria: The game is fully playable: the snake moves and responds to WASD/Arrow keys without self-reversal, grows when eating food, triggers game over on wall or self-collision, and saves the high score to localStorage.
+- Task Dependencies: `snakeGameHtml-a70390-t1-1613dd`
 
-Deliverable: `Game User Interface` (`gameUi-832f05`)
-- Kind: `ui`
-- Goal: Create a user interface for the Snake game using a suitable framework.
-- Priority: `1`
-- Deliverable Dependencies: `coreLogic-5083b1`
-- Tasks: 
-1. **Create a new React component for the Snake game UI.** (`gameUi-832f05-t1-88f00f`)
-- Output: `A new React component file named `SnakeGameUI.js` in the `src/components` directory.`
-- Completion Criteria: The component should render the snake, score, and game over screen.
-- Task Dependencies: `coreLogic-5083b1-t4-b835bc`
-2. **Implement the logic to display the snake on the screen.** (`gameUi-832f05-t2-7dead7`)
-- Output: `Updated code within the `SnakeGameUI.js` file to include rendering of the snake's segments.`
-- Completion Criteria: The snake should be visible on the screen as a series of connected segments.
-- Task Dependencies: `gameUi-832f05-t1-88f00f`
-3. **Add functionality to display the score and game over screen.** (`gameUi-832f05-t3-ec02a2`)
-- Output: `Updated code within the `SnakeGameUI.js` file to include rendering of the score and game over message.`
-- Completion Criteria: The score should be displayed at the top of the screen, and the game over screen should appear when the game ends.
-- Task Dependencies: `gameUi-832f05-t2-7dead7`
-
-Deliverable: `Project Documentation` (`readme-c307e9`)
+Deliverable: `Documentation and Play Guide` (`readme-50e9cf`)
 - Kind: `readme`
-- Goal: Provide documentation for setting up and running the Snake game.
+- Goal: Provide clear instructions on how to run the game, control schemes, and an overview of the code architecture.
 - Priority: `5`
-- Deliverable Dependencies: `coreLogic-5083b1, gameUi-832f05`
+- Deliverable Dependencies: `snakeGameHtml-a70390`
 - Tasks: 
-1. **Create a README.md file in the project root directory.** (`readme-c307e9-t1-77c810`)
-- Output: `A README.md file containing installation instructions, running the game, and controls.`
-- Completion Criteria: The README.md file should be present in the project root directory with the specified content.
-- Task Dependencies: `coreLogic-5083b1-t4-b835bc, gameUi-832f05-t3-ec02a2`
+1. **Create the user-facing play guide in README.md detailing browser launch instructions, control schemes (Arrow keys/WASD), and core gameplay mechanics.** (`readme-50e9cf-t1-e33fb1`)
+- Output: `README.md file containing the 'How to Play' and 'Controls' sections.`
+- Completion Criteria: Verify that README.md exists and clearly explains how to open the game in a browser without external dependencies, along with a complete breakdown of WASD/Arrow controls and game rules.
+- Task Dependencies: `snakeGameHtml-a70390-t2-c6ada0`
+2. **Document the technical architecture in README.md, detailing the game loop, state management, and rendering logic to guide future customization.** (`readme-50e9cf-t2-88cd1c`)
+- Output: `README.md file updated with an 'Architecture and Customization' section.`
+- Completion Criteria: Verify that the README.md contains a structured overview of the game's codebase, explaining how the game loop updates state and how the rendering engine draws the frames.
+- Task Dependencies: `readme-50e9cf-t1-e33fb1`
 
 Execution Schedule Table
 
 | Priority | Task ID | Deliverable | Objective | Dependencies |
 
-| 1 | `coreLogic-5083b1-t1-9f6dc3` | Core Game Logic | Implement snake movement control logic. | `None` |
-| 1 | `coreLogic-5083b1-t2-b15221` | Core Game Logic | Implement food generation logic. | `coreLogic-5083b1-t1-9f6dc3` |
-| 1 | `coreLogic-5083b1-t3-686b0b` | Core Game Logic | Implement collision detection logic. | `coreLogic-5083b1-t2-b15221` |
-| 1 | `coreLogic-5083b1-t4-b835bc` | Core Game Logic | Implement scoring logic. | `coreLogic-5083b1-t3-686b0b` |
-| 1 | `gameUi-832f05-t1-88f00f` | Game User Interface | Create a new React component for the Snake game UI. | `coreLogic-5083b1-t4-b835bc` |
-| 1 | `gameUi-832f05-t2-7dead7` | Game User Interface | Implement the logic to display the snake on the screen. | `gameUi-832f05-t1-88f00f` |
-| 1 | `gameUi-832f05-t3-ec02a2` | Game User Interface | Add functionality to display the score and game over screen. | `gameUi-832f05-t2-7dead7` |
-| 5 | `readme-c307e9-t1-77c810` | Project Documentation | Create a README.md file in the project root directory. | `coreLogic-5083b1-t4-b835bc, gameUi-832f05-t3-ec02a2` |
+| 1 | `snakeGameHtml-a70390-t1-1613dd` | Single-File HTML5 Snake Game | Create the single-file HTML structure and responsive CSS styling to center the game board and style the score displays. | `None` |
+| 1 | `snakeGameHtml-a70390-t2-c6ada0` | Single-File HTML5 Snake Game | Implement the complete JavaScript game engine within the HTML file, including the game loop, keyboard input handling, collision detection, food spawning, and localStorage score persistence. | `snakeGameHtml-a70390-t1-1613dd` |
+| 5 | `readme-50e9cf-t1-e33fb1` | Documentation and Play Guide | Create the user-facing play guide in README.md detailing browser launch instructions, control schemes (Arrow keys/WASD), and core gameplay mechanics. | `snakeGameHtml-a70390-t2-c6ada0` |
+| 5 | `readme-50e9cf-t2-88cd1c` | Documentation and Play Guide | Document the technical architecture in README.md, detailing the game loop, state management, and rendering logic to guide future customization. | `readme-50e9cf-t1-e33fb1` |

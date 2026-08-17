@@ -1,7 +1,7 @@
 import json
 import re
 from typing import Dict, List, Any
-from core.config import get_llm
+from core.config import get_llm, get_gemini_key, extract_text
 
 ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into a minimal set of coarse-grained, modular deliverables (typically 2 to 4 deliverables total).
 
@@ -40,10 +40,14 @@ User request:
 """
 
 def getPlannerLLM():
-    return get_llm(model_name = "qwen2.5-coder:7b", temperature = 0)
+    return get_llm(api_key=get_gemini_key("1"), temperature=0)
 
-def parseLLMjson(text: str) -> Any:
-    text = text.strip()
+def parseLLMjson(text: Any) -> Any:
+    text = extract_text(text).strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -98,8 +102,8 @@ def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
     for attempt in range(2):
         try:
             response = llm.invoke(promptText)
-            text = response.content if hasattr(response, "content") else str(response)
-            parsed = parseLLMjson(text)
+            content = response.content if hasattr(response, "content") else response
+            parsed = parseLLMjson(content)
             deliverables = validateDeliverables(parsed)
             if deliverables:
                 return deliverables
@@ -158,8 +162,6 @@ class PromptAgent:
     def summary(deliverablesList: List[Dict[str, Any]]) -> str:
         names = [d.get("name", str(d)).replace("_", " ") for d in deliverablesList]
         return f"Deliver: {', '.join(names)}" if names else "Unclear request"
-<<<<<<< Updated upstream
-=======
 
 
 if __name__ == "__main__":
@@ -167,16 +169,3 @@ if __name__ == "__main__":
     agent = PromptAgent()
     example = "Create a README, Dockerfile, and a login page with authentication, offline only"
     print(_json.dumps(agent.process(example), indent = 2))
-
-    @staticmethod
-    def summary(deliverables: List[Dict]) -> str:
-        names = [d.get("name", str(d)).replace("_", " ") for d in deliverables]
-        return f"Deliver: {', '.join(names)}" if names else "Unclear request"
-
-
-if __name__ == "__main__":
-    import json as _json
-    agent = PromptAgent()
-    example = "Create a README, Dockerfile, and a login page with authentication, offline only"
-    print(_json.dumps(agent.process(example), indent = 2))
->>>>>>> Stashed changes

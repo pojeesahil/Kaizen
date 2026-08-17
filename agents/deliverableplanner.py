@@ -2,7 +2,7 @@ import json
 import re
 from typing import List, Optional, Any, Dict
 from agents.models import Deliverable, TaskNode, DeliverablePlan, newId, deliverable, taskNode, deliverablePlan
-from core.config import get_llm
+from core.config import get_llm, get_gemini_key, extract_text
 
 TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a compact, coarse-grained list of implementation tasks (maximum 2-3 tasks per deliverable).
 
@@ -33,10 +33,14 @@ Return ONLY a JSON object with this exact structure, no other text:
 }}"""
 
 def getPlannerLLM():
-    return get_llm(model_name = "qwen2.5-coder:7b", temperature = 0)
+    return get_llm(api_key=get_gemini_key("1"), temperature=0)
 
-def parseLLMjson(text: str) -> Any:
-    text = text.strip()
+def parseLLMjson(text: Any) -> Any:
+    text = extract_text(text).strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -92,8 +96,8 @@ def callLLMforTasks(deliverable: Deliverable) -> List[dict]:
     for attempt in range(2):
         try:
             response = llm.invoke(promptText)
-            text = response.content if hasattr(response, "content") else str(response)
-            parsed = parseLLMjson(text)
+            content = response.content if hasattr(response, "content") else response
+            parsed = parseLLMjson(content)
             tasks = validateTasks(parsed)
             if tasks:
                 return tasks
@@ -149,19 +153,4 @@ def attachChild(tasks: List[TaskNode], parentId: str, childId: str) -> None:
             task.childTasks.append(childId)
             return
 
-<<<<<<< Updated upstream
 deliverablePlanner = DeliverablePlanner
-=======
-    @staticmethod
-    def _completionCriteria(Step: str, Deliverable: Deliverable, IsLast: bool) -> str:
-        if IsLast:
-            return f"{Deliverable.name} exists, matches spec, and passes validation."
-        return f"'{Step}' complete for {Deliverable.name}."
-
-
-def _attachChild(Tasks: List[TaskNode], ParentId: str, ChildId: str) -> None:
-    for Task in Tasks:
-        if Task.id == ParentId:
-            Task.childTasks.append(ChildId)
-            return
->>>>>>> Stashed changes

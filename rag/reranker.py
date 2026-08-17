@@ -5,7 +5,7 @@ from langchain_classic.retrievers.contextual_compression import BaseDocumentComp
 from langchain_core.documents import Document
 from langchain_core.callbacks import Callbacks
 from langchain_core.retrievers import BaseRetriever
-from core.config import llm
+from core.config import llm, extract_text
 
 
 class SimpleLLMReranker(BaseDocumentCompressor):
@@ -28,7 +28,6 @@ class SimpleLLMReranker(BaseDocumentCompressor):
         if not documents:
             return []
 
-
         prompt = (
             "You are an expert reranker. Given a user query and a list of code snippets (documents), "
             "determine which snippets are most relevant to the query.\n\n"
@@ -48,7 +47,7 @@ class SimpleLLMReranker(BaseDocumentCompressor):
 
         try:
             response = self.llm.invoke(prompt)
-            content = response.content.strip()
+            content = extract_text(response.content if hasattr(response, "content") else response).strip()
 
             match = re.search(r"\[\s*\d+\s*(?:,\s*\d+\s*)*\]", content)
             if match:
