@@ -18,6 +18,8 @@ class dagMerger:
 
         taskByIdMap = {t.id: t for t in allTasks}
 
+        # Here the actual cross-deliverable dependency phase begins.
+        
         for deliverableItem in deliverablesList:
             entryTaskId = firstTaskByDeliverable.get(deliverableItem.id)
             if not entryTaskId:

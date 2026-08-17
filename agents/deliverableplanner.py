@@ -141,11 +141,11 @@ class DeliverablePlanner:
 
         return tasks
 
-    @staticmethod
-    def completionCriteria(step: str, deliverable: Deliverable, isLast: bool) -> str:
-        if isLast:
-            return f"{deliverable.name} exists, matches spec, and passes validation."
-        return f"'{step}' complete for {deliverable.name}."
+@staticmethod
+def completionCriteria(step: str, deliverable: Deliverable, isLast: bool) -> str:
+    if isLast:
+        return f"{deliverable.name} exists, matches spec, and passes validation."
+    return f"'{step}' complete for {deliverable.name}."
 
 def attachChild(tasks: List[TaskNode], parentId: str, childId: str) -> None:
     for task in tasks:
