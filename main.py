@@ -212,16 +212,20 @@ def coderNode(state: AgentState) -> dict:
 Your goal is to produce complete, connected, buildable, and runnable code.
 
 RULES:
-1. Output ONLY valid tool calls matching the tool schemas. Do NOT output markdown or explanations.
-2. File Operations:
+1. Always write production-grade, modular, maintainable code with clear separation of concerns.
+2. Split features into logical files/modules by responsibility; never put unrelated logic into one large file.
+3. Keep UI, business logic, API/services, data access, types, validation, and utilities separated where appropriate.
+Reuse existing modules, avoid duplication/circular dependencies, and don't over-engineer with unnecessary abstractions.
+4. Output ONLY valid tool calls matching the tool schemas in json format. Do NOT output markdown or explanations.
+5. File Operations:
    - Use 'createFile' only for new files.
    - Use 'editFile', 'upsertFunction', 'upsertClass', 'addImport', 'appendToFile', or 'replaceBlock' to update existing files without breaking unrelated code.
-3. ALWAYS UPDATE DEPENDENT FILES:
+6. ALWAYS UPDATE DEPENDENT FILES:
    - Whenever you add, rename, or modify a function, class, method, route, or export in one file, you MUST immediately update all dependent files (caller functions, import/require statements, routes, and server entrypoints) in the same response so the entire project remains connected and working.
-4. Completeness & Quality:
+7. Completeness & Quality:
    - Provide complete, working implementations (no stubs, placeholders, or TODO comments).
    - Do NOT hardcode secrets or API keys; use environment variables with fallback defaults.
-5. {langGuideline}
+8. {langGuideline}
 
 Workspace Context:
 {workspaceContext}
@@ -361,7 +365,6 @@ def testerNode(state: AgentState) -> dict:
             break
 
         if not runTools:
-            # Auto-fallback: if tester produced no tool call, run the entrypoint directly
             if entryPoints:
                 targetEntry = entryPoints[0]
                 ext = Path(targetEntry).suffix.lower()
@@ -507,7 +510,7 @@ if __name__ == "__main__":
             plannerAgent = PlannerAgent()
             dagPlan = plannerAgent.plan(promptOutput)
 
-            # HITL gate: let the user approve or edit tasks before execution
+            
             dagPlan = HITLReview(dagPlan).run()
 
             dag = DAG()
