@@ -158,11 +158,11 @@ class PromptAgent:
 
     run = process
 
-    @staticmethod
-    def summary(deliverablesList: List[Dict[str, Any]]) -> str:
-        names = [d.get("name", str(d)).replace("_", " ") for d in deliverablesList]
-        return f"Deliver: {', '.join(names)}" if names else "Unclear request"
 
+@staticmethod
+def summary(deliverablesList: List[Dict[str, Any]]) -> str:
+    names = [d.get("name", str(d)).replace("_", " ") for d in deliverablesList]
+    return f"Deliver: {', '.join(names)}" if names else "Unclear request"
 
 if __name__ == "__main__":
     import json as _json
