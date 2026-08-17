@@ -135,7 +135,6 @@ def executeToolCalls(response, toolsList):
                 idx = start + 1
 
     if not executed:
-        # Fallback: extract code block if LLM generated raw markdown
         codeMatch = re.search(r"```(?:python|py|js|javascript|html)?\n(.*?)```", text, re.DOTALL)
         if codeMatch:
             rawCode = codeMatch.group(1).strip()

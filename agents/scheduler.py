@@ -4,6 +4,9 @@ import asyncio
 from pathlib import Path
 from agents.dag import DAG
 from rag.rag import indexWorkspace
+from main import runBatchEval
+from main import runCoder
+
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
 
 class Scheduler:
@@ -42,8 +45,7 @@ class Scheduler:
 
         instruction = f"Overall Goal: {self.goal}\nTask: {tname}" if self.goal else tname
         feedback = self.taskFeedbacks.get(task.id, "")
-        from main import runCoder
-
+       
         result = runCoder(instruction, taskContext=depContext, feedback=feedback)
         autoFixImports(self.workDir)
 
@@ -121,6 +123,6 @@ class Scheduler:
             self.loadReadyTasks()
 
         if completedTasks:
-            from main import runBatchEval
+            
             await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
             print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
