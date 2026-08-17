@@ -1,32 +1,19 @@
 digraph DAGPlan {
 rankdir = "TB";
 node [shape = box, style = rounded];
-subgraph cluster_coreLogic_5083b1 {
-label="Core Game Logic";
+subgraph cluster_snakeGameHtml_a70390 {
+label="Single-File HTML5 Snake Game";
 style=dashed;
-        coreLogic_5083b1_t1_9f6dc3 [label="Implement snake movement control logic."];
-        coreLogic_5083b1_t2_b15221 [label="Implement food generation logic."];
-        coreLogic_5083b1_t3_686b0b [label="Implement collision detection logic."];
-        coreLogic_5083b1_t4_b835bc [label="Implement scoring logic."];
+        snakeGameHtml_a70390_t1_1613dd [label="Create the single-file HTML structure and responsive CSS styling to center the game board and style the score displays."];
+        snakeGameHtml_a70390_t2_c6ada0 [label="Implement the complete JavaScript game engine within the HTML file, including the game loop, keyboard input handling, collision detection, food spawning, and localStorage score persistence."];
 }
-subgraph cluster_gameUi_832f05 {
-label="Game User Interface";
+subgraph cluster_readme_50e9cf {
+label="Documentation and Play Guide";
 style=dashed;
-        gameUi_832f05_t1_88f00f [label="Create a new React component for the Snake game UI."];
-        gameUi_832f05_t2_7dead7 [label="Implement the logic to display the snake on the screen."];
-        gameUi_832f05_t3_ec02a2 [label="Add functionality to display the score and game over screen."];
+        readme_50e9cf_t1_e33fb1 [label="Create the user-facing play guide in README.md detailing browser launch instructions, control schemes (Arrow keys/WASD), and core gameplay mechanics."];
+        readme_50e9cf_t2_88cd1c [label="Document the technical architecture in README.md, detailing the game loop, state management, and rendering logic to guide future customization."];
 }
-subgraph cluster_readme_c307e9 {
-label="Project Documentation";
-style=dashed;
-        readme_c307e9_t1_77c810 [label="Create a README.md file in the project root directory."];
-}
-    coreLogic_5083b1_t1_9f6dc3 -> coreLogic_5083b1_t2_b15221;
-    coreLogic_5083b1_t2_b15221 -> coreLogic_5083b1_t3_686b0b;
-    coreLogic_5083b1_t3_686b0b -> coreLogic_5083b1_t4_b835bc;
-    coreLogic_5083b1_t4_b835bc -> gameUi_832f05_t1_88f00f;
-    gameUi_832f05_t1_88f00f -> gameUi_832f05_t2_7dead7;
-    gameUi_832f05_t2_7dead7 -> gameUi_832f05_t3_ec02a2;
-    coreLogic_5083b1_t4_b835bc -> readme_c307e9_t1_77c810;
-    gameUi_832f05_t3_ec02a2 -> readme_c307e9_t1_77c810;
+    snakeGameHtml_a70390_t1_1613dd -> snakeGameHtml_a70390_t2_c6ada0;
+    snakeGameHtml_a70390_t2_c6ada0 -> readme_50e9cf_t1_e33fb1;
+    readme_50e9cf_t1_e33fb1 -> readme_50e9cf_t2_88cd1c;
 }
