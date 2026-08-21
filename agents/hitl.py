@@ -9,8 +9,8 @@ class HITLReview:
         while True:
             tasks = self.dagPlan.taskNodes
             print("\nPlan Review")
-            for index, task in enumerate(tasks, start=1):
-                print(f"  {index}. {task.objective}")
+            for idx, task in enumerate(tasks, start=1):
+                print(f"  {idx}. {task.objective}")
 
             print("\nOptions:")
             print("  [a] Approve and run")
@@ -29,8 +29,8 @@ class HITLReview:
         while True:
             tasks = self.dagPlan.taskNodes
             print("\n--- Current Tasks ---")
-            for index, task in enumerate(tasks, start=1):
-                print(f"  {index}. {task.objective}")
+            for idx, task in enumerate(tasks, start=1):
+                print(f"  {idx}. {task.objective}")
 
             print("\nEdit Menu:")
             print("  1. Edit a task")
@@ -93,6 +93,30 @@ class HITLReview:
                 print("Invalid option. Please enter 1, 2, 3, or 4.")
 
     edit_tasks = editTasks
+
+def reviewDeliverables(deliverables: list, techStack: str = "") -> tuple[bool, str]:
+    print("\nProposed Implementation Plan:")
+    if techStack:
+        print(f"Tech Stack: {techStack}\n")
+    for idx, d in enumerate(deliverables, start=1):
+        name = d.get("name", str(d)) if isinstance(d, dict) else getattr(d, "name", str(d))
+        goal = d.get("goal", "") if isinstance(d, dict) else getattr(d, "goal", "")
+        kind = d.get("kind", "") if isinstance(d, dict) else getattr(d, "kind", "")
+        print(f"  {idx}. {name} [{kind}] - {goal}")
+
+    print("\nOptions:")
+    print("  [p] Proceed with plan")
+    print("  [c] Change / adjust plan")
+
+    while True:
+        choice = input("\nEnter choice (p/c): ").strip().lower()
+        if choice == "p":
+            return True, ""
+        elif choice == "c":
+            fb = input("\nEnter adjustments/changes for the plan: ").strip()
+            return False, fb
+        else:
+            print("Enter 'p' to proceed or 'c' to change.")
 
 def finalReview() -> str:
     print("\n--- Final Review ---")

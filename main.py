@@ -28,7 +28,7 @@ from agents.prompt import PromptAgent
 from agents.planneragent import PlannerAgent
 from agents.dag import DAG
 from agents.scheduler import Scheduler
-from agents.hitl import HITLReview
+from agents.hitl import HITLReview, reviewDeliverables
 
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 
@@ -504,12 +504,19 @@ if __name__ == "__main__":
             print("Reindexed the workspace")
         elif q:
             promptAgent = PromptAgent()
-            promptOutput = promptAgent.process(query)
+            curQuery = query
+            while True:
+                promptOutput = promptAgent.process(curQuery)
+                deliverables = promptOutput.get("deliverables", [])
+                techStack = promptOutput.get("tech_stack") or promptOutput.get("techStack") or ""
+                proceed, usrFeedback = reviewDeliverables(deliverables, techStack)
+                if proceed:
+                    break
+                curQuery = f"{query}\nUser Plan Feedback: {usrFeedback}"
+                print("\nRegenerating plan based on your feedback...\n")
 
             plannerAgent = PlannerAgent()
             dagPlan = plannerAgent.plan(promptOutput)
-
-            
             dagPlan = HITLReview(dagPlan).run()
 
             dag = DAG()
@@ -528,5 +535,5 @@ if __name__ == "__main__":
             print(dag.topologicalSort())
 
             indexWorkspace()
-            scheduler = Scheduler(dag, query)
+            scheduler = Scheduler(dag, query, coderFn=runCoder, evalFn=runBatchEval)
             asyncio.run(scheduler.run())

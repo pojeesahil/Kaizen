@@ -2,18 +2,18 @@ import os
 import heapq
 import asyncio
 from pathlib import Path
+from typing import Callable, Optional
 from agents.dag import DAG
 from rag.rag import indexWorkspace
-from main import runBatchEval
-from main import runCoder
-
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
 
 class Scheduler:
 
-    def __init__(self, dag: DAG, goal: str = ""):
+    def __init__(self, dag: DAG, goal: str = "", coderFn: Optional[Callable] = None, evalFn: Optional[Callable] = None):
         self.dag = dag
         self.goal = goal
+        self.coderFn = coderFn
+        self.evalFn = evalFn
         self.queue: list[tuple[int, str]] = []
         self.taskOutputs: dict[str, str] = {}
         self.taskFeedbacks: dict[str, str] = {}
@@ -33,7 +33,7 @@ class Scheduler:
         depContext = ""
         for depId in getattr(task, "dependencies", []):
             if depId in self.taskOutputs:
-                depContext += f"\n- Parent task '{depId}' output: {self.taskOutputs[depId]}"
+                depContext += f"\n- Parent task '{depId}' completed: {self.taskOutputs[depId]}"
 
         manifestContext = formatManifestContext(self.workDir)
         if manifestContext:
@@ -45,8 +45,12 @@ class Scheduler:
 
         instruction = f"Overall Goal: {self.goal}\nTask: {tname}" if self.goal else tname
         feedback = self.taskFeedbacks.get(task.id, "")
-       
-        result = runCoder(instruction, taskContext=depContext, feedback=feedback)
+
+        if self.coderFn:
+            result = self.coderFn(instruction, taskContext=depContext, feedback=feedback)
+        else:
+            result = {"coderMessage": "Task executed", "toolResults": []}
+
         autoFixImports(self.workDir)
 
         isValid, errors = validateConnectedness(self.workDir)
@@ -54,7 +58,8 @@ class Scheduler:
             errText = "\n".join(f"- {e}" for e in errors)
             print(f"\n[Post-Task AST Import Check Failed for '{tname}']:\n{errText}")
             repairPrompt = f"Fix the following import and syntax errors in workspace files immediately:\n{errText}"
-            result = runCoder(repairPrompt, taskContext=depContext, feedback=errText)
+            if self.coderFn:
+                result = self.coderFn(repairPrompt, taskContext=depContext, feedback=errText)
             autoFixImports(self.workDir)
 
         return result
@@ -123,6 +128,6 @@ class Scheduler:
             self.loadReadyTasks()
 
         if completedTasks:
-            
-            await asyncio.to_thread(runBatchEval, completedTasks, allCoderResults)
+            if self.evalFn:
+                await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults)
             print("\n[Kaizen] All plan tasks executed and verified successfully.\n")

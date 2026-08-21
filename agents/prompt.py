@@ -23,6 +23,7 @@ For each deliverable, provide:
 
 Return ONLY a JSON object with this exact structure, no other text:
 {
+  "tech_stack": "concise tech stack, e.g. Python (standard library / curses / pygame)",
   "deliverables": [
     {
       "id": "...",
@@ -95,7 +96,7 @@ def fallbackDeliverable(userPrompt: str) -> List[Dict]:
         "priority": 3,
     }]
 
-def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
+def callLLMforDeliverables(userPrompt: str) -> tuple[List[Dict], str]:
     llm = getPlannerLLM()
     promptText = ANALYSIS_PROMPT + userPrompt.strip()
 
@@ -106,16 +107,17 @@ def callLLMforDeliverables(userPrompt: str) -> List[Dict]:
             parsed = parseLLMjson(content)
             deliverables = validateDeliverables(parsed)
             if deliverables:
-                return deliverables
+                techStack = str(parsed.get("tech_stack") or parsed.get("techStack") or "").strip()
+                return deliverables, techStack
         except Exception as e:
             print(f"[PromptAgent] LLM call attempt {attempt + 1} failed: {e}")
 
     print("[PromptAgent] WARNING: LLM analysis failed, using fallback deliverable.")
-    return fallbackDeliverable(userPrompt)
+    return fallbackDeliverable(userPrompt), "Python / Standard Library"
 
 class PromptAgent:
     def process(self, userPrompt: str) -> Dict:
-        deliverablesList = callLLMforDeliverables(userPrompt)
+        deliverablesList, techStack = callLLMforDeliverables(userPrompt)
         names = [d["name"] for d in deliverablesList]
         intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"
         projectType = deliverablesList[0]["kind"] if deliverablesList else "unclassified"
@@ -140,8 +142,10 @@ class PromptAgent:
             "architecture": [],
             "domain": [projectType],
             "deliverables": deliverablesList,
-            "recommended_stack": {},
-            "recommendedStack": {},
+            "tech_stack": techStack,
+            "techStack": techStack,
+            "recommended_stack": {"primary": techStack} if techStack else {},
+            "recommendedStack": {"primary": techStack} if techStack else {},
             "requirements": {"essential": [], "recommended": [], "optional": []},
             "missing_information": [],
             "missingInformation": [],
