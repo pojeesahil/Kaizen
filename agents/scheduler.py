@@ -9,9 +9,10 @@ from core.connectedness import formatManifestContext, validateConnectedness, aut
 
 class Scheduler:
 
-    def __init__(self, dag: DAG, goal: str = "", coderFn: Optional[Callable] = None, evalFn: Optional[Callable] = None):
+    def __init__(self, dag: DAG, goal: str = "", techStack: str = "", coderFn: Optional[Callable] = None, evalFn: Optional[Callable] = None):
         self.dag = dag
         self.goal = goal
+        self.techStack = techStack
         self.coderFn = coderFn
         self.evalFn = evalFn
         self.queue: list[tuple[int, str]] = []
@@ -43,7 +44,14 @@ class Scheduler:
         if workFiles:
             depContext += "\n\nCurrent workspace file contents:\n" + workFiles
 
-        instruction = f"Overall Goal: {self.goal}\nTask: {tname}" if self.goal else tname
+        instParts = []
+        if self.goal:
+            instParts.append(f"Overall Goal: {self.goal}")
+        if self.techStack:
+            instParts.append(f"Target Tech Stack: {self.techStack}")
+        instParts.append(f"Task: {tname}")
+        instruction = "\n".join(instParts)
+
         feedback = self.taskFeedbacks.get(task.id, "")
 
         if self.coderFn:

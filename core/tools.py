@@ -78,9 +78,122 @@ def addImport(path: str, module: str, name: str = "", alias: str = "") -> str:
         f.writelines(lines)
     return f"Success: Added import '{importLine}' to {filePath}"
 
+def findBalancedBlock(src: str, openBraceIdx: int) -> int:
+    depth = 0
+    inStr = None
+    i = openBraceIdx
+    n = len(src)
+    while i < n:
+        ch = src[i]
+        if inStr:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == inStr:
+                inStr = None
+        else:
+            if ch in ('"', "'", "`"):
+                inStr = ch
+            elif ch == "/" and i + 1 < n:
+                if src[i + 1] == "/":
+                    eol = src.find("\n", i)
+                    i = eol if eol != -1 else n
+                    continue
+                elif src[i + 1] == "*":
+                    closeComment = src.find("*/", i + 2)
+                    i = closeComment + 2 if closeComment != -1 else n
+                    continue
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        i += 1
+    return -1
+
+def replaceFunctionInSrc(src: str, fnName: str, newCode: str, isPy: bool) -> tuple[bool, str]:
+    if isPy:
+        pat = rf"^[ \t]*(?:@\w+.*?\n[ \t]*)*(?:async\s+)?def\s+{re.escape(fnName)}\s*\([^)]*\)(?:\s*->\s*[^:]+)?:"
+        match = re.search(pat, src, re.MULTILINE)
+        if match:
+            startIdx = match.start()
+            sub = src[match.end():]
+            lines = sub.splitlines(keepends=True)
+            bodyLen = 0
+            for line in lines:
+                if line.strip() == "" or line.startswith((" ", "\t")):
+                    bodyLen += len(line)
+                else:
+                    break
+            endIdx = match.end() + bodyLen
+            updated = src[:startIdx] + newCode.strip() + "\n" + src[endIdx:]
+            return True, updated
+        return False, src
+
+    patterns = [
+        rf"(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+{re.escape(fnName)}\s*\(",
+        rf"(?:export\s+)?(?:const|let|var)\s+{re.escape(fnName)}\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>",
+        rf"(?:export\s+)?(?:const|let|var)\s+{re.escape(fnName)}\s*=\s*(?:async\s*)?function",
+        rf"func\s+(?:\([^)]*\)\s+)?{re.escape(fnName)}\s*\(",
+        r"(?:public|private|protected|static|final|native|synchronized|async|virtual|override|void|[a-zA-Z0-9_<>[\]*&]+)\s+" + re.escape(fnName) + r"\s*\([^;{}]*\)\s*(?:const\s*)?\{",
+    ]
+
+    for pat in patterns:
+        match = re.search(pat, src)
+        if match:
+            startIdx = match.start()
+            braceIdx = src.find("{", match.end() - 1)
+            if braceIdx != -1:
+                endIdx = findBalancedBlock(src, braceIdx)
+                if endIdx != -1:
+                    if endIdx < len(src) and src[endIdx] == ";":
+                        endIdx += 1
+                    updated = src[:startIdx] + newCode.strip() + "\n" + src[endIdx:].lstrip("\r\n")
+                    return True, updated
+    return False, src
+
+def replaceClassInSrc(src: str, clsName: str, newCode: str, isPy: bool) -> tuple[bool, str]:
+    if isPy:
+        pat = rf"^[ \t]*(?:@\w+.*?\n[ \t]*)*class\s+{re.escape(clsName)}\b[^:]*:"
+        match = re.search(pat, src, re.MULTILINE)
+        if match:
+            startIdx = match.start()
+            sub = src[match.end():]
+            lines = sub.splitlines(keepends=True)
+            bodyLen = 0
+            for line in lines:
+                if line.strip() == "" or line.startswith((" ", "\t")):
+                    bodyLen += len(line)
+                else:
+                    break
+            endIdx = match.end() + bodyLen
+            updated = src[:startIdx] + newCode.strip() + "\n" + src[endIdx:]
+            return True, updated
+        return False, src
+
+    patterns = [
+        rf"(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:class|interface|struct|enum)\s+{re.escape(clsName)}\b",
+        rf"type\s+{re.escape(clsName)}\s+(?:struct|interface)\b",
+    ]
+
+    for pat in patterns:
+        match = re.search(pat, src)
+        if match:
+            startIdx = match.start()
+            braceIdx = src.find("{", match.end() - 1)
+            if braceIdx != -1:
+                endIdx = findBalancedBlock(src, braceIdx)
+                if endIdx != -1:
+                    if endIdx < len(src) and src[endIdx] == ";":
+                        endIdx += 1
+                    updated = src[:startIdx] + newCode.strip() + "\n" + src[endIdx:].lstrip("\r\n")
+                    return True, updated
+    return False, src
+
 @tool
 def upsertFunction(path: str, functionCode: str) -> str:
-    """Add or replace functions in a file without modifying other code."""
+    """Add or replace functions in a file across any language without modifying other code."""
     filePath = resolvePath(path)
     filePath.parent.mkdir(parents=True, exist_ok=True)
     isPy = filePath.suffix.lower() == ".py"
@@ -102,7 +215,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
     with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
         src = f.read()
 
-    # Python AST-level replacement
+    # Python AST-level replacement with regex fallback
     if isPy and fnNodes:
         processedNames = []
         for fnNode in fnNodes:
@@ -124,6 +237,9 @@ def upsertFunction(path: str, functionCode: str) -> str:
                 pass
 
             if not replaced:
+                replaced, src = replaceFunctionInSrc(src, fnName, singleFnCode, isPy=True)
+
+            if not replaced:
                 mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)
                 if mainMatch:
                     splitIdx = mainMatch.start()
@@ -138,24 +254,32 @@ def upsertFunction(path: str, functionCode: str) -> str:
             f.write(src)
         return f"Success: Upserted function(s) '{', '.join(processedNames)}' in {filePath}"
 
-    # Non-Python or generic replacement
+    # Universal non-Python or regex-based replacement
     namesFound = (
         re.findall(r"(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)", functionCode) or
         re.findall(r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=", functionCode) or
-        re.findall(r"def\s+([a-zA-Z0-9_]+)", functionCode)
+        re.findall(r"func\s+(?:\([^)]*\)\s+)?([a-zA-Z0-9_]+)\s*\(", functionCode) or
+        re.findall(r"def\s+([a-zA-Z0-9_]+)", functionCode) or
+        re.findall(r"(?:void|[a-zA-Z0-9_<>[\]*&]+)\s+([a-zA-Z0-9_]+)\s*\(", functionCode)
     )
     fnName = namesFound[0] if namesFound else "function"
+
+    replaced, newSrc = replaceFunctionInSrc(src, fnName, functionCode, isPy=isPy)
+    if replaced:
+        with open(filePath, "w", encoding="utf-8") as f:
+            f.write(newSrc)
+        return f"Success: Modified existing function '{fnName}' in-place in {filePath}"
 
     spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
     src = src + spacing + functionCode.strip() + "\n"
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(src)
-    return f"Success: Upserted function '{fnName}' in {filePath}"
+    return f"Success: Added function '{fnName}' to {filePath}"
 
 @tool
 def upsertClass(path: str, classCode: str) -> str:
-    """Add or replace classes in a file without modifying other code."""
+    """Add or replace classes in a file across any language without modifying other code."""
     filePath = resolvePath(path)
     filePath.parent.mkdir(parents=True, exist_ok=True)
     isPy = filePath.suffix.lower() == ".py"
@@ -177,7 +301,7 @@ def upsertClass(path: str, classCode: str) -> str:
     with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
         src = f.read()
 
-    # Python AST-level replacement
+    # Python AST-level replacement with fallback
     if isPy and clsNodes:
         processedNames = []
         for clsNode in clsNodes:
@@ -199,6 +323,9 @@ def upsertClass(path: str, classCode: str) -> str:
                 pass
 
             if not replaced:
+                replaced, src = replaceClassInSrc(src, clsName, singleClsCode, isPy=True)
+
+            if not replaced:
                 mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)
                 if mainMatch:
                     splitIdx = mainMatch.start()
@@ -213,16 +340,25 @@ def upsertClass(path: str, classCode: str) -> str:
             f.write(src)
         return f"Success: Upserted class(es) '{', '.join(processedNames)}' in {filePath}"
 
-    # Non-Python or generic class replacement
-    namesFound = re.findall(r"class\s+([a-zA-Z0-9_$]+)", classCode)
+    # Universal non-Python or regex-based replacement
+    namesFound = (
+        re.findall(r"(?:class|interface|struct|enum)\s+([a-zA-Z0-9_$]+)", classCode) or
+        re.findall(r"type\s+([a-zA-Z0-9_]+)\s+(?:struct|interface)", classCode)
+    )
     clsName = namesFound[0] if namesFound else "class"
+
+    replaced, newSrc = replaceClassInSrc(src, clsName, classCode, isPy=isPy)
+    if replaced:
+        with open(filePath, "w", encoding="utf-8") as f:
+            f.write(newSrc)
+        return f"Success: Modified existing class '{clsName}' in-place in {filePath}"
 
     spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
     src = src + spacing + classCode.strip() + "\n"
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(src)
-    return f"Success: Upserted class '{clsName}' in {filePath}"
+    return f"Success: Added class '{clsName}' to {filePath}"
 
 @tool
 def appendToFile(path: str, content: str) -> str:

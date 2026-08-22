@@ -186,22 +186,27 @@ def coderNode(state: AgentState) -> dict:
     time.sleep(0.5)
     print(f"\nCoder iteration {iteration}")
 
-    instText = (state["instruction"] + " " + state.get("taskContext", "") + " " + state.get("feedback", "")).lower()
+    instLower = state["instruction"].lower()
+    taskContextLower = state.get("taskContext", "").lower()
+    combinedText = f"{instLower} {taskContextLower}"
+
     filesInWork = list(WORK_DIR.glob("*")) if WORK_DIR.exists() else []
     exts = {f.suffix.lower() for f in filesInWork if f.is_file()}
 
-    if any(e in (".js", ".ts", ".jsx", ".tsx") for e in exts) or any(w in instText for w in ("node", "npm", "express", "javascript", "js", "react", "next")):
-        langGuideline = "Tech Stack: Node.js / JavaScript (CJS). Use require() and module.exports. Link all routes and handlers. Use dotenv / process.env for config."
-    elif any(e == ".go" for e in exts) or "go" in instText or "golang" in instText:
-        langGuideline = "Tech Stack: Go. Use standard package declarations, imports, and func main(). Use os.Getenv() for config."
-    elif any(e in (".c", ".cpp", ".cc", ".h", ".hpp") for e in exts) or any(w in instText for w in ("c++", "cpp", "gcc", "g++", "c language")):
+    if "python" in combinedText or any(e == ".py" for e in exts):
+        langGuideline = "Tech Stack: Python 3. Standard Python syntax. Place 'if __name__ == \"__main__\": main()' at entrypoints."
+    elif any(e in (".js", ".ts", ".jsx", ".tsx") for e in exts) or any(w in combinedText for w in ("node", "express", "javascript", "react", "next")):
+        langGuideline = "Tech Stack: Node.js / JavaScript (CJS). Use require() and module.exports."
+    elif any(e == ".go" for e in exts) or re.search(r"\bgolang\b|\bgo language\b", combinedText):
+        langGuideline = "Tech Stack: Go. Use standard package declarations, imports, and func main()."
+    elif any(e in (".c", ".cpp", ".cc", ".h", ".hpp") for e in exts) or any(w in combinedText for w in ("c++", "cpp", "gcc", "g++", "c language")):
         langGuideline = "Tech Stack: C / C++. Use standard headers (#include), header guards, and int main()."
-    elif any(e == ".java" for e in exts) or "java" in instText:
+    elif any(e == ".java" for e in exts) or re.search(r"\bjava\b", combinedText):
         langGuideline = "Tech Stack: Java. Class name must match filename with public static void main(String[] args)."
-    elif any(e in (".html", ".css") for e in exts) or any(w in instText for w in ("html", "css", "website", "web page", "frontend")):
+    elif any(e in (".html", ".css") for e in exts) or any(w in combinedText for w in ("html", "css", "website", "frontend")):
         langGuideline = "Tech Stack: HTML5 / CSS / JavaScript. Dynamic DOM manipulation and fetch() for API calls."
     else:
-        langGuideline = "Tech Stack: Python. Standard Python 3 syntax. Use os.environ.get() for config and place if __name__ == '__main__': at entrypoints."
+        langGuideline = "Tech Stack: Python 3. Standard Python syntax. Place 'if __name__ == \"__main__\": main()' at entrypoints."
 
     taskContext = state.get("taskContext", "") or "None"
     feedbackContext = state.get("feedback", "") or "None"
@@ -535,5 +540,5 @@ if __name__ == "__main__":
             print(dag.topologicalSort())
 
             indexWorkspace()
-            scheduler = Scheduler(dag, query, coderFn=runCoder, evalFn=runBatchEval)
+            scheduler = Scheduler(dag, query, techStack=techStack, coderFn=runCoder, evalFn=runBatchEval)
             asyncio.run(scheduler.run())
