@@ -195,7 +195,25 @@ def coderNode(state: AgentState) -> dict:
     filesInWork = list(WORK_DIR.glob("*")) if WORK_DIR.exists() else []
     exts = {f.suffix.lower() for f in filesInWork if f.is_file()}
 
-    if any(w in combinedText for w in ("website", "frontend", "html", "css", "ecommerce", "landing page", "web app")) or any(e in (".html", ".css") for e in exts):
+    targetStackMatch = re.search(r"target tech stack:\s*([^\n]+)", combinedText, re.IGNORECASE)
+    projStack = targetStackMatch.group(1).lower() if targetStackMatch else ""
+
+    if projStack:
+        if any(w in projStack for w in ("python", "pygame", "streamlit", "flask", "django", "fastapi")):
+            langGuideline = "Tech Stack: Python 3. Standard Python syntax. All files in the workspace MUST be pure Python (.py). Never generate C++, Java, or JS files."
+        elif any(w in projStack for w in ("html", "css", "react", "vue", "frontend", "website", "web app", "spa")):
+            langGuideline = "Tech Stack: HTML5 / CSS3 / JavaScript. Build a standalone runnable web application with 'index.html' at the root as the main entrypoint, linked CSS, and browser-compatible JavaScript (DOM manipulation or ES Modules). Do NOT write unbundled React JSX with require()."
+        elif any(w in projStack for w in ("node", "express", "backend")):
+            langGuideline = "Tech Stack: Node.js / Express (CJS). Use require() and module.exports with server.js or app.js entrypoint."
+        elif any(w in projStack for w in ("c++", "cpp", "c language")):
+            langGuideline = "Tech Stack: C / C++. Use standard headers (#include), header guards, and int main()."
+        elif any(w in projStack for w in ("go", "golang")):
+            langGuideline = "Tech Stack: Go. Use standard package declarations, imports, and func main()."
+        elif any(w in projStack for w in ("java",)):
+            langGuideline = "Tech Stack: Java. Class name must match filename with public static void main(String[] args)."
+        else:
+            langGuideline = f"Tech Stack: {projStack}. Build all files strictly adhering to {projStack} standards."
+    elif any(w in combinedText for w in ("website", "frontend", "html", "css", "ecommerce", "landing page", "web app")) or any(e in (".html", ".css") for e in exts):
         langGuideline = "Tech Stack: HTML5 / CSS3 / JavaScript. Build a standalone runnable web application with 'index.html' at the root as the main entrypoint, linked CSS, and browser-compatible JavaScript (DOM manipulation or ES Modules). Do NOT write unbundled React JSX with require()."
     elif "python" in combinedText or any(e == ".py" for e in exts):
         langGuideline = "Tech Stack: Python 3. Standard Python syntax. Place 'if __name__ == \"__main__\": main()' at entrypoints."
@@ -242,8 +260,9 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
    - When upsertClass modifies a class, also update ALL standalone code below it (like if __name__ blocks) that instantiates that class so arguments stay in sync.
 9. FILE TARGETING:
    - Only modify files directly relevant to your current task objective. Do NOT touch unrelated files unless updating their imports/calls to match your changes.
-10. DIRECTORY LAYOUT CONSISTENCY:
-   - Keep all source files at the workspace root (e.g. 'game_logic.py', 'terminal_ui.py', 'main.py') unless an explicit package structure is requested. Never split files between root and nested subdirectories like 'src/game/'.
+10. DIRECTORY LAYOUT & LANGUAGE PURITY:
+   - Keep all source files at the workspace root unless an explicit package structure is requested. Never split files between root and nested subdirectories.
+   - All files created MUST match the project's target tech stack. Never create C/C++ files in a Python project or mix incompatible languages.
 11. {langGuideline}
 
 Workspace Context:
