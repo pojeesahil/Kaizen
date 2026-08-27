@@ -1,13 +1,19 @@
 import os
 import logging
+import warnings
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
+warnings.filterwarnings("ignore")
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 load_dotenv("secure.env")
 load_dotenv()
+
+gCreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+if gCreds and not os.path.exists(gCreds):
+    del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
 
 
 def extract_text(content) -> str:
@@ -54,8 +60,22 @@ def get_llm(provider=None, model_name=None, temperature=0, api_key=None):
         api_key:     Explicit Gemini API key. If None, uses the default key.
     """
     provider = provider or os.getenv("LLM_PROVIDER", "gemini").lower()
-    if provider == "gemini":
-        model_name = model_name or os.getenv("LLM_MODEL", "gemini-3.5-flash")
+    if provider in ("vertex", "vertexai"):
+        from langchain_google_vertexai import ChatVertexAI
+        model_name = model_name or os.getenv("LLM_MODEL", "gemini-2.5-flash")
+        key_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if key_path and os.path.exists(key_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(key_path)
+        elif key_path and not os.path.exists(key_path):
+            del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+        return ChatVertexAI(
+            model_name=model_name,
+            project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+            location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
+            temperature=temperature,
+        )
+    elif provider == "gemini":
+        model_name = model_name or os.getenv("LLM_MODEL", "gemini-2.5-flash")
         from langchain_google_genai import ChatGoogleGenerativeAI
         resolved_key = api_key or get_gemini_key()
         return ChatGoogleGenerativeAI(model=model_name, temperature=temperature, google_api_key=resolved_key)
@@ -73,17 +93,27 @@ def get_llm(provider=None, model_name=None, temperature=0, api_key=None):
 
 
 def get_embeddings(provider=None):
-    provider = provider or os.getenv("LLM_PROVIDER", "gemini").lower()
-    if provider == "gemini":
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        api_key = get_gemini_key("2")
-        return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
+    provider = provider or os.getenv("LLM_PROVIDER", "vertexai").lower()
+    if provider in ("vertex", "vertexai"):
+        try:
+            from langchain_google_vertexai import VertexAIEmbeddings
+            return VertexAIEmbeddings(
+                model_name="text-embedding-004",
+                project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+                location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
+            )
+        except Exception:
+            pass
+    elif provider == "gemini":
+        apiKey = get_gemini_key("2") or get_gemini_key()
+        if apiKey:
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=apiKey)
     elif provider == "openai":
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings()
-    else:
-        return OllamaEmbeddings(model="qwen2.5-coder:7b")
+    return OllamaEmbeddings(model="qwen2.5-coder:7b")
 
 
 embeddings = get_embeddings()
-llm = get_llm(api_key=get_gemini_key("2"))
+llm = get_llm()

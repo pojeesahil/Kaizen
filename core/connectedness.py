@@ -195,9 +195,16 @@ def buildExactImportMap(workDir: Path) -> Dict[str, str]:
     for rel, data in manifest.items():
         if not rel.endswith(".py"):
             continue
-        modPath = rel[:-3].replace("/", ".")
+        parts = rel[:-3].split("/")
+        if parts[0] == "src" and not (workDir / "src" / "__init__.py").exists():
+            parts = parts[1:]
+        if not parts:
+            continue
+        modPath = ".".join(parts)
         if modPath.endswith(".__init__"):
             modPath = modPath[:-9]
+        if not modPath:
+            continue
 
         for func in data.get("functions", []):
             fname = func.split("(")[0].strip()
@@ -340,7 +347,11 @@ def autoFixImports(workDir: Path) -> None:
 
             missingSymbols = usedSymbols - definedSymbols - importedSymbols - BUILTIN_NAMES - STDLIB_MODULES
             addedImports = []
-            curMod = fpath.relative_to(workDir).as_posix()[:-3].replace("/", ".")
+            curRel = fpath.relative_to(workDir).as_posix()
+            curParts = curRel[:-3].split("/")
+            if curParts[0] == "src" and not (workDir / "src" / "__init__.py").exists():
+                curParts = curParts[1:]
+            curMod = ".".join(curParts)
 
             for sym in sorted(missingSymbols):
                 if sym in importMap:

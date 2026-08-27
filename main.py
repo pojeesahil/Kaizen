@@ -165,7 +165,9 @@ def streamInvoke(model, messages):
     fullResponse = None
     for chunk in model.stream(messages):
         if chunk.content:
-            print(chunk.content, end="", flush=True)
+            cleanChunk = extractText(chunk.content)
+            if cleanChunk:
+                print(cleanChunk, end="", flush=True)
         fullResponse = chunk if fullResponse is None else fullResponse + chunk
     print("\n")
     return fullResponse
@@ -193,18 +195,18 @@ def coderNode(state: AgentState) -> dict:
     filesInWork = list(WORK_DIR.glob("*")) if WORK_DIR.exists() else []
     exts = {f.suffix.lower() for f in filesInWork if f.is_file()}
 
-    if "python" in combinedText or any(e == ".py" for e in exts):
+    if any(w in combinedText for w in ("website", "frontend", "html", "css", "ecommerce", "landing page", "web app")) or any(e in (".html", ".css") for e in exts):
+        langGuideline = "Tech Stack: HTML5 / CSS3 / JavaScript. Build a standalone runnable web application with 'index.html' at the root as the main entrypoint, linked CSS, and browser-compatible JavaScript (DOM manipulation or ES Modules). Do NOT write unbundled React JSX with require()."
+    elif "python" in combinedText or any(e == ".py" for e in exts):
         langGuideline = "Tech Stack: Python 3. Standard Python syntax. Place 'if __name__ == \"__main__\": main()' at entrypoints."
-    elif any(e in (".js", ".ts", ".jsx", ".tsx") for e in exts) or any(w in combinedText for w in ("node", "express", "javascript", "react", "next")):
-        langGuideline = "Tech Stack: Node.js / JavaScript (CJS). Use require() and module.exports."
+    elif any(e in (".js", ".ts") for e in exts) or any(w in combinedText for w in ("node", "express", "backend", "server")):
+        langGuideline = "Tech Stack: Node.js / Express (CJS). Use require() and module.exports with server.js or app.js entrypoint."
     elif any(e == ".go" for e in exts) or re.search(r"\bgolang\b|\bgo language\b", combinedText):
         langGuideline = "Tech Stack: Go. Use standard package declarations, imports, and func main()."
     elif any(e in (".c", ".cpp", ".cc", ".h", ".hpp") for e in exts) or any(w in combinedText for w in ("c++", "cpp", "gcc", "g++", "c language")):
         langGuideline = "Tech Stack: C / C++. Use standard headers (#include), header guards, and int main()."
     elif any(e == ".java" for e in exts) or re.search(r"\bjava\b", combinedText):
         langGuideline = "Tech Stack: Java. Class name must match filename with public static void main(String[] args)."
-    elif any(e in (".html", ".css") for e in exts) or any(w in combinedText for w in ("html", "css", "website", "frontend")):
-        langGuideline = "Tech Stack: HTML5 / CSS / JavaScript. Dynamic DOM manipulation and fetch() for API calls."
     else:
         langGuideline = "Tech Stack: Python 3. Standard Python syntax. Place 'if __name__ == \"__main__\": main()' at entrypoints."
 
@@ -214,6 +216,12 @@ def coderNode(state: AgentState) -> dict:
 
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
 Your goal is to produce complete, connected, buildable, and runnable code.
+
+You operate in a ReAct loop (Thought -> Action -> Observation):
+1. Thought: Reason about what files or functions need to be inspected, written, or connected based on the live AST context.
+2. Action: Call the appropriate tool (readFile, createFile, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock).
+3. Observation: After each tool execution, you will receive the tool result and the updated live AST Symbol Registry of the workspace.
+4. Completion: When all code for your task is fully implemented with zero stubs or placeholders and all imports match existing AST signatures, respond with your final summary without calling any more tools.
 
 RULES:
 1. Always write production-grade, modular, maintainable code with clear separation of concerns.
@@ -229,7 +237,14 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
 7. Completeness & Quality:
    - Provide complete, working implementations (no stubs, placeholders, or TODO comments).
    - Do NOT hardcode secrets or API keys; use environment variables with fallback defaults.
-8. {langGuideline}
+8. SIGNATURE MATCHING:
+   - Before calling ANY constructor or function, use 'readFile' to check the existing file and match the EXACT parameter names and order already defined.
+   - When upsertClass modifies a class, also update ALL standalone code below it (like if __name__ blocks) that instantiates that class so arguments stay in sync.
+9. FILE TARGETING:
+   - Only modify files directly relevant to your current task objective. Do NOT touch unrelated files unless updating their imports/calls to match your changes.
+10. DIRECTORY LAYOUT CONSISTENCY:
+   - Keep all source files at the workspace root (e.g. 'game_logic.py', 'terminal_ui.py', 'main.py') unless an explicit package structure is requested. Never split files between root and nested subdirectories like 'src/game/'.
+11. {langGuideline}
 
 Workspace Context:
 {workspaceContext}
@@ -245,20 +260,49 @@ QA Feedback to Address:
         coderMessages.append(HumanMessage(content=f"Please fix the following issues reported by QA:\n{state['feedback']}"))
 
     threadModel = get_llm().bind_tools(coderTools)
-    coderResponse = streamInvoke(threadModel, coderMessages)
-    coderMessage = extractText(coderResponse.content)
+    allToolResults = []
+    lastResponse = None
+    lastMessage = ""
 
-    toolResults = executeToolCalls(coderResponse, coderTools)
-    for tr in toolResults:
-        print(f"{tr}\n")
+    for turn in range(4):
+        coderResponse = streamInvoke(threadModel, coderMessages)
+        lastResponse = coderResponse
+        lastMessage = extractText(coderResponse.content)
+        toolResults = executeToolCalls(coderResponse, coderTools)
+
+        if not toolResults:
+            break
+
+        allToolResults.extend(toolResults)
+        for tr in toolResults:
+            print(f"{tr}\n")
+
+        autoFixImports(WORK_DIR)
+        liveAst = formatManifestContext(WORK_DIR)
+        obsText = "\n".join(toolResults)
+
+        hasWriteTool = any(
+            any(wt in tr for wt in ("createFile", "editFile", "upsertFunction", "upsertClass", "appendToFile", "replaceBlock"))
+            for tr in toolResults
+        )
+
+        coderMessages.extend([
+            coderResponse,
+            HumanMessage(
+                content=f"Observation:\n{obsText}\n\nLive Workspace AST Context:\n{liveAst}\n\nReflect on the updated AST and tool output. If further files, imports, or connections are needed to finish the task, take your next Action (tool call). Otherwise, provide your final summary."
+            )
+        ])
+
+        if hasWriteTool and turn >= 2:
+            break
 
     autoFixImports(WORK_DIR)
 
     return {
         "iteration": iteration,
-        "coderMessage": coderMessage,
-        "toolResults": toolResults,
-        "messages": [coderResponse]
+        "coderMessage": lastMessage,
+        "toolResults": allToolResults,
+        "messages": [lastResponse] if lastResponse else []
     }
 
 def criticNode(state: AgentState) -> dict:
@@ -270,19 +314,45 @@ def criticNode(state: AgentState) -> dict:
     if not isValid:
         connFeedback = "\nSTATIC CONNECTEDNESS & SYNTAX ERRORS:\n" + "\n".join(f"- {e}" for e in connErrors)
 
+    manifestContext = formatManifestContext(WORK_DIR)
+    workFileParts = []
+    skipDirs = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out"}
+    supportedExts = {".py", ".js", ".ts", ".java", ".html", ".css", ".json", ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".md"}
+
+    if WORK_DIR.exists():
+        for root, dirs, files in os.walk(WORK_DIR):
+            dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
+            for fname in sorted(files):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in supportedExts:
+                    continue
+                fpath = Path(root) / fname
+                rel = fpath.relative_to(WORK_DIR).as_posix()
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    if content.strip():
+                        workFileParts.append(f"--- {rel} ---\n{content}")
+                except Exception:
+                    continue
+
+    workFilesStr = "\n\n".join(workFileParts) if workFileParts else "No files in workspace."
+
     criticPretext = (
         "You are an expert Code Critic. Verify the code changes logically and structurally.\n"
         "CRITICAL EVALUATION RULES:\n"
         "1. Do NOT fail code evaluation because of environment/system installation tasks (such as 'Install Node.js', 'Install npm', 'Create directory'). The workspace is a local file environment.\n"
         "2. Evaluate strictly whether the required source code files (e.g. package.json, server.js, route handlers, etc.) exist and have valid logic.\n"
+        "3. Review the actual file contents provided below before judging completeness.\n"
         "Respond starting strictly with 'PASS' if the code is valid, or 'FAIL' followed by what needs fixing."
     )
     criticInstruction = (
         f"Original Instruction: {state['instruction']}\n"
-        f"Coder claims to have done: {state.get('coderMessage', '')}\n"
-        f"Tool execution results: {state.get('toolResults', [])}\n"
+        f"Coder Summary: {state.get('coderMessage', '')}\n\n"
+        f"Workspace Symbol Registry:\n{manifestContext}\n\n"
+        f"Workspace File Contents:\n{workFilesStr}\n"
         f"{connFeedback}\n\n"
-        "Evaluate the code. Respond starting strictly with PASS or FAIL."
+        "Evaluate the actual workspace file contents above. Respond starting strictly with PASS or FAIL."
     )
 
     criticResponse = streamInvoke(agentModel, [SystemMessage(content=criticPretext), HumanMessage(content=criticInstruction)])
@@ -295,7 +365,8 @@ def criticNode(state: AgentState) -> dict:
 
     return {
         "messages": [criticResponse],
-        "feedback": f"Critic Feedback:\n{criticMessage}" if not isPass else state["feedback"]
+        "feedback": f"Critic Feedback:\n{criticMessage}" if not isPass else state["feedback"],
+        "success": isPass
     }
 
 def testerNode(state: AgentState) -> dict:
@@ -319,33 +390,55 @@ def testerNode(state: AgentState) -> dict:
                                 entryPoints.append(relStr)
                         except Exception:
                             pass
-                    elif relStr.endswith((".html", ".js")):
+                    elif relStr == "index.html" or relStr.endswith("/index.html"):
+                        entryPoints.append(relStr)
+                    elif relStr in ("server.js", "app.js", "index.js", "main.js", "src/server.js", "src/app.js", "src/index.js"):
                         entryPoints.append(relStr)
 
     filesStr = ", ".join(allFiles) if allFiles else "None"
     entryStr = ", ".join(entryPoints) if entryPoints else (allFiles[0] if allFiles else "None")
     manifestStr = formatManifestContext(WORK_DIR)
+    hasPackages = any("/" in f for f in allFiles if f.endswith(".py"))
+    pyPathPrefix = f"set PYTHONPATH={WORK_DIR.resolve()} && " if os.name == "nt" else f"PYTHONPATH={WORK_DIR.resolve()} "
+
+    runHints = []
+    for ep in entryPoints:
+        if ep.endswith(".py") and "/" in ep:
+            modName = ep.replace("/", ".").replace("\\", ".").removesuffix(".py")
+            runHints.append(f"python -m {modName}")
+        elif ep.endswith(".py"):
+            runHints.append(f"python {ep}")
+        elif ep.endswith(".html"):
+            runHints.append(f"open {ep}")
+        elif ep.endswith(".js"):
+            runHints.append(f"node {ep}")
+    hintsStr = ", ".join(runHints) if runHints else "python <entrypoint>"
 
     runPretext = (
         "You are responsible for verifying code execution in the workspace.\n"
         "CRITICAL RULES:\n"
         "- Output executeCommand tool calls to test and run the application.\n"
-        "- Terminal CWD is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'. Run files directly (e.g. 'python app.py').\n"
+        "- Terminal CWD is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'.\n"
         f"- Files in workspace: [{filesStr}]\n"
-        f"- Detected Entrypoints: [{entryStr}]\n\n"
+        f"- Detected Entrypoints: [{entryStr}]\n"
+        f"- Suggested run commands: [{hintsStr}]\n\n"
         f"{manifestStr}\n\n"
-        "- If an application requires interactive console input (input()), test it non-interactively via import checks ('python -c \"import <module>\"') or piped inputs.\n"
+        f"- For Python packages (files inside subdirectories), ALWAYS use: {pyPathPrefix}python -m <package>.<module>\n"
+        "- NEVER run a file inside a package directly like 'python subfolder/file.py' as it breaks package imports.\n"
+        "- If an application requires interactive console input (input()), test non-interactively via import checks or piped inputs.\n"
+        "- If the app uses tkinter/pygame/GUI, run a non-interactive syntax+import check instead: python -c \"import <module>\"\n"
         "- If execution completes with Exit Code: 0 and no errors, respond strictly with 'PASS'.\n"
         "- If execution crashes or throws errors, respond strictly with 'FAIL' followed by error details."
     )
 
     runMessages = [
         SystemMessage(content=runPretext),
-        HumanMessage(content=f"Workspace files: [{filesStr}]. Detected Entrypoint: [{entryStr}]. Run executeCommand to verify that the application or tests execute without errors.")
+        HumanMessage(content=f"Workspace files: [{filesStr}]. Detected Entrypoint: [{entryStr}]. Run executeCommand to verify the application executes without errors.")
     ]
 
     testerResponse = None
     testerMessage = ""
+    allRunTools = []
 
     for attempt in range(1, 4):
         if attempt > 1:
@@ -353,57 +446,69 @@ def testerNode(state: AgentState) -> dict:
         testerResponse = streamInvoke(agentModel, runMessages)
         testerMessage = extractText(testerResponse.content)
         runTools = executeToolCalls(testerResponse, tools)
-        for tr in runTools:
-            print(tr, "\n")
+        if runTools:
+            allRunTools.extend(runTools)
+            for tr in runTools:
+                print(tr, "\n")
+
+        testOutput = "\n".join(allRunTools)
+        hasZeroExit = "Exit Code: 0" in testOutput
+        hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
 
         if testerMessage.strip().upper().startswith("PASS"):
             break
 
-        testOutput = "\n".join(runTools)
-        hasZeroExit = "Exit Code: 0" in testOutput
-        hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
-
         if runTools and hasZeroExit and not hasError:
             testerMessage = "PASS"
-            print("\n[Auto-detected] Main file executed successfully (Exit Code: 0).")
+            print("\n[Tester] Application execution verified successfully (Exit Code: 0).")
             break
 
-        if not runTools:
+        if not runTools and not allRunTools:
             if entryPoints:
                 targetEntry = entryPoints[0]
                 ext = Path(targetEntry).suffix.lower()
-                if ext in (".js", ".ts"):
-                    autoCmd = f"node -c {targetEntry}"
+                if ext == ".html":
+                    autoCmd = f"node -e \"console.log('Static web frontend entrypoint verified: {targetEntry}')\""
+                elif ext in (".js", ".ts"):
+                    autoCmd = f"node {targetEntry}"
+                elif ext == ".py" and "/" in targetEntry:
+                    modName = targetEntry.replace("/", ".").replace("\\", ".").removesuffix(".py")
+                    autoCmd = f"{pyPathPrefix}python -m {modName}"
                 elif ext == ".py":
-                    autoCmd = f"python -m py_compile {targetEntry}"
+                    autoCmd = f"{pyPathPrefix}python {targetEntry}"
                 elif ext == ".go":
-                    autoCmd = f"go vet {targetEntry}"
+                    autoCmd = f"go run {targetEntry}"
                 elif ext in (".c", ".cpp"):
-                    autoCmd = f"gcc {targetEntry} -o main.exe" if os.name == "nt" else f"gcc -fsyntax-only {targetEntry}"
+                    autoCmd = f"gcc {targetEntry} -o main.exe && main.exe" if os.name == "nt" else f"gcc {targetEntry} -o main && ./main"
                 elif ext == ".java":
-                    autoCmd = f"javac {targetEntry}"
+                    autoCmd = f"javac {targetEntry} && java {Path(targetEntry).stem}"
                 else:
-                    autoCmd = f"python -m py_compile {targetEntry}"
-                if "executeCommand" in {t.name: t for t in tools}:
-                    print(f"\n[Auto-Verifying Entrypoint] {autoCmd}")
-                    autoRes = executeCommand.invoke({"command": autoCmd})
-                    runTools.append(f"Auto-Execution: {autoRes}")
-                    if "Exit Code: 0" in autoRes and "Traceback" not in autoRes and "Error:" not in autoRes:
-                        testerMessage = "PASS"
-                        break
+                    autoCmd = f"python {targetEntry}"
+                print(f"\n[Tester Execution Proposal] {autoCmd}")
+                autoRes = executeCommand.invoke({"command": autoCmd})
+                allRunTools.append(f"Auto-Execution: {autoRes}")
+                testOutput = "\n".join(allRunTools)
+                hasZeroExit = "Exit Code: 0" in testOutput
+                hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
+                if hasZeroExit and not hasError:
+                    testerMessage = "PASS"
+                    break
 
             runMessages.extend([
                 testerResponse,
-                HumanMessage(content=f"You did NOT use any tool calls. Output an executeCommand tool call to run the entrypoint file [{entryStr}].")
+                HumanMessage(content=f"You did not call any tools. Output an executeCommand tool call to run the application [{hintsStr}].")
             ])
             continue
 
         runMessages.extend([
             testerResponse,
-            HumanMessage(content="Terminal output:\n" + "\n".join(runTools) + "\n\nEvaluate the output. If execution passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
+            HumanMessage(content="Terminal output:\n" + "\n".join(allRunTools) + "\n\nEvaluate the output. If execution passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
         ])
 
-    isPass = testerMessage.strip().upper().startswith("PASS")
+    testOutput = "\n".join(allRunTools)
+    hasZeroExit = "Exit Code: 0" in testOutput
+    hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
+    isPass = testerMessage.strip().upper().startswith("PASS") and (not hasError if allRunTools else True)
     if isPass:
         print("\nProcess finished successfully.\n")
 
@@ -415,7 +520,7 @@ def testerNode(state: AgentState) -> dict:
 
 def routeCritic(state: AgentState) -> str:
     lastMessage = extractText(state["messages"][-1].content)
-    if not lastMessage.strip().upper().startswith("PASS"):
+    if not lastMessage.strip().upper().startswith("PASS") or not state.get("success", False):
         return END
     return "tester"
 
@@ -452,9 +557,9 @@ def runBatchEval(batchTasks, coderResults):
     print(f"\n[Batch Verification] Verifying {len(batchTasks)} completed task(s): {taskNames}")
 
     isValid, connErrors = validateConnectedness(WORK_DIR)
-    if isValid:
-        print("[Batch Verification] All workspace files validated with clean AST/Syntax. Batch PASSED.")
-        return True, "Batch verified successfully."
+    if not isValid:
+        errMsg = "\n".join(f"- {e}" for e in connErrors)
+        print(f"[Batch Verification] AST/Syntax errors detected:\n{errMsg}")
 
     summaryText = "\n".join([f"- Task '{getattr(t, 'name', t.id)}': {res.get('coderMessage', '')}" for t, res in zip(batchTasks, coderResults)])
     combinedTools = sum([res.get("toolResults", []) for res in coderResults], [])
@@ -473,9 +578,13 @@ def runBatchEval(batchTasks, coderResults):
     }
 
     finalState = evalWorkflow.invoke(initialState)
-    if finalState.get("success") or isValid:
-        return True, "Batch verified successfully."
-    return True, "Batch evaluation completed."
+    passed = finalState.get("success", False)
+    fb = finalState.get("feedback", "")
+    if passed:
+        print("[Batch Verification] Execution tests PASSED.")
+    else:
+        print(f"[Batch Verification] Execution tests FAILED: {fb}")
+    return passed, fb
 
 def runAgent(instruction, taskContext=""):
     print("Indexing workspace: ")

@@ -222,22 +222,52 @@ def upsertFunction(path: str, functionCode: str) -> str:
             fnName = fnNode.name
             processedNames.append(fnName)
             singleFnCode = ast.get_source_segment(functionCode.strip(), fnNode) or functionCode.strip()
+            isMethod = bool(fnNode.args.args and fnNode.args.args[0].arg in ("self", "cls"))
 
             replaced = False
             try:
                 fileTree = ast.parse(src, filename=str(filePath))
-                targetNode = next((n for n in fileTree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fnName), None)
-                if targetNode and hasattr(targetNode, "lineno") and hasattr(targetNode, "end_lineno"):
-                    lines = src.splitlines(keepends=True)
-                    before = lines[:targetNode.lineno - 1]
-                    after = lines[targetNode.end_lineno:]
-                    src = "".join(before) + singleFnCode.strip() + "\n" + "".join(after)
-                    replaced = True
+                for node in fileTree.body:
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fnName:
+                        lines = src.splitlines(keepends=True)
+                        before = lines[:node.lineno - 1]
+                        after = lines[node.end_lineno:]
+                        src = "".join(before) + singleFnCode.strip() + "\n" + "".join(after)
+                        replaced = True
+                        break
+                    elif isinstance(node, ast.ClassDef):
+                        for classChild in node.body:
+                            if isinstance(classChild, (ast.FunctionDef, ast.AsyncFunctionDef)) and classChild.name == fnName:
+                                lines = src.splitlines(keepends=True)
+                                before = lines[:classChild.lineno - 1]
+                                after = lines[classChild.end_lineno:]
+                                indentedCode = "\n".join("    " + l if l.strip() else l for l in singleFnCode.strip().splitlines())
+                                src = "".join(before) + indentedCode + "\n" + "".join(after)
+                                replaced = True
+                                break
+                        if replaced:
+                            break
             except Exception:
                 pass
 
             if not replaced:
                 replaced, src = replaceFunctionInSrc(src, fnName, singleFnCode, isPy=True)
+
+            if not replaced and isMethod:
+                try:
+                    fileTree = ast.parse(src, filename=str(filePath))
+                    classes = [n for n in fileTree.body if isinstance(n, ast.ClassDef)]
+                    if classes:
+                        targetClass = classes[0]
+                        lines = src.splitlines(keepends=True)
+                        insertLine = targetClass.end_lineno
+                        indentedCode = "\n".join("    " + l if l.strip() else l for l in singleFnCode.strip().splitlines())
+                        before = lines[:insertLine]
+                        after = lines[insertLine:]
+                        src = "".join(before) + "\n" + indentedCode + "\n" + "".join(after)
+                        replaced = True
+                except Exception:
+                    pass
 
             if not replaced:
                 mainMatch = re.search(r"\nif\s+__name__\s*==\s*['\"]__main__['\"]\s*:", src)

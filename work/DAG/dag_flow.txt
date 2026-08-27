@@ -1,9 +1,0 @@
-DAG VISUALIZATION
-
-Deliverable: [snakeGameHtml-a70390] Single-File HTML5 Snake Game (Priority: 1, Depends on: none)
-  |-- Task [snakeGameHtml-a70390-t1-1613dd]: Create the single-file HTML structure and responsive CSS styling to center the game board and style the score displays. (deps: none)
-  |-- Task [snakeGameHtml-a70390-t2-c6ada0]: Implement the complete JavaScript game engine within the HTML file, including the game loop, keyboard input handling, collision detection, food spawning, and localStorage score persistence. (deps: snakeGameHtml-a70390-t1-1613dd)
-
-Deliverable: [readme-50e9cf] Documentation and Play Guide (Priority: 5, Depends on: snakeGameHtml-a70390)
-  |-- Task [readme-50e9cf-t1-e33fb1]: Create the user-facing play guide in README.md detailing browser launch instructions, control schemes (Arrow keys/WASD), and core gameplay mechanics. (deps: snakeGameHtml-a70390-t2-c6ada0)
-  |-- Task [readme-50e9cf-t2-88cd1c]: Document the technical architecture in README.md, detailing the game loop, state management, and rendering logic to guide future customization. (deps: readme-50e9cf-t1-e33fb1)

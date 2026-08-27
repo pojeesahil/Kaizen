@@ -137,5 +137,27 @@ class Scheduler:
 
         if completedTasks:
             if self.evalFn:
-                await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults)
-            print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+                passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults)
+                if passed:
+                    print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+                else:
+                    for retry in range(1, 4):
+                        print(f"\n[Kaizen Repair {retry}/3] Triggering Coder Agent to fix verification failure...")
+                        repairPrompt = (
+                            f"Overall Goal: {self.goal}\n"
+                            f"Target Tech Stack: {self.techStack}\n\n"
+                            f"The project implementation failed verification with the following Critic/Tester feedback:\n{fb}\n\n"
+                            "Inspect the current workspace files and use tool calls (createFile, editFile, upsertFunction, upsertClass) to implement the missing components and resolve all issues."
+                        )
+                        fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=fb)
+                        allCoderResults.append(fixRes)
+                        await asyncio.to_thread(indexWorkspace)
+
+                        passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults)
+                        if passed:
+                            print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+                            break
+                    else:
+                        print(f"\n[Kaizen] Verification could not be resolved after 3 repair attempts.\n")
+            else:
+                print("\n[Kaizen] All plan tasks executed.\n")
