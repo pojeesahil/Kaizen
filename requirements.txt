@@ -3,6 +3,9 @@ langchain-core
 langchain-community
 langchain-text-splitters
 langchain-google-genai
+langchain-google-vertexai
+google-cloud-aiplatform
+google-auth
 langchain-chroma
 langchain-ollama
 langgraph

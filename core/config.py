@@ -12,8 +12,15 @@ load_dotenv("secure.env")
 load_dotenv()
 
 gCreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if gCreds and not os.path.exists(gCreds):
-    del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+if gCreds:
+    from pathlib import Path
+    credsPath = Path(gCreds)
+    if not credsPath.is_absolute():
+        credsPath = (Path(__file__).resolve().parent.parent / gCreds).resolve()
+    if credsPath.exists():
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credsPath)
+    else:
+        del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
 
 
 def extract_text(content) -> str:
