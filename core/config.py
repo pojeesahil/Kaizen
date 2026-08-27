@@ -3,6 +3,7 @@ import logging
 import warnings
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama, OllamaEmbeddings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
@@ -13,7 +14,6 @@ load_dotenv()
 
 gCreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if gCreds:
-    from pathlib import Path
     credsPath = Path(gCreds)
     if not credsPath.is_absolute():
         credsPath = (Path(__file__).resolve().parent.parent / gCreds).resolve()
@@ -24,7 +24,6 @@ if gCreds:
 
 
 def extract_text(content) -> str:
-    """Safely extract plain text from various LangChain message content formats (str, list, dict)."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -44,12 +43,6 @@ extractText = extract_text
 
 
 def get_gemini_key(key_name=None):
-    """Retrieve a named Gemini API key.
-
-    Args:
-        key_name: "1" for planning agents, "2" for execution agents,
-                  or None for the default key.
-    """
     if key_name:
         key = os.getenv(f"GEMINI_API_KEY_{key_name}")
         if key:
@@ -58,14 +51,6 @@ def get_gemini_key(key_name=None):
 
 
 def get_llm(provider=None, model_name=None, temperature=0, api_key=None):
-    """Create an LLM instance.
-
-    Args:
-        provider:    "gemini", "openai", "anthropic", or None (Ollama fallback).
-        model_name:  Override the default model for the provider.
-        temperature: Sampling temperature.
-        api_key:     Explicit Gemini API key. If None, uses the default key.
-    """
     provider = provider or os.getenv("LLM_PROVIDER", "gemini").lower()
     if provider in ("vertex", "vertexai"):
         from langchain_google_vertexai import ChatVertexAI
