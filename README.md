@@ -1,1 +1,1 @@
-# Kaizen
+# KAIZEN

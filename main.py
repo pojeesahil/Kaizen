@@ -29,8 +29,26 @@ from agents.planneragent import PlannerAgent
 from agents.dag import DAG
 from agents.scheduler import Scheduler
 from agents.hitl import HITLReview, reviewDeliverables
+from core.memory import MemoryManager
 
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
+
+memoryManager = MemoryManager()
+
+def shouldRetrieveMemory(instruction: str) -> bool:
+    instructionLower = instruction.lower().strip()
+    if len(instructionLower) < 15:
+        return False
+    greetings = {"hello", "hi", "hey", "good morning", "good afternoon", "how are you"}
+    if any(instructionLower == g or instructionLower.startswith(g + " ") for g in greetings):
+        return False
+    keywords = {
+        "fix", "error", "fail", "test", "debug", "auth", "jwt", "database", "db", 
+        "run", "compile", "dependency", "import", "package", "config", "convention",
+        "style", "preference", "success", "failure", "lesson", "build"
+    }
+    return any(word in instructionLower for word in keywords)
+
 
 def extractText(content) -> str:
     if isinstance(content, str):
@@ -171,6 +189,8 @@ class AgentState(TypedDict):
     success: bool
     coderMessage: str
     toolResults: list
+    memories: list
+
 
 def coderNode(state: AgentState) -> dict:
     iteration = state["iteration"] + 1
@@ -221,6 +241,8 @@ def coderNode(state: AgentState) -> dict:
     feedbackContext = state.get("feedback", "") or "None"
     workspaceContext = state.get("context", "") or "None"
     initialAst = formatManifestContext(WORK_DIR)
+    memoriesList = state.get("memories", [])
+    memoriesStr = "\n".join(f"- {m}" for m in memoriesList) if memoriesList else "None"
 
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
 Your goal is to produce complete, connected, buildable, and runnable code.
@@ -260,6 +282,9 @@ Workspace Symbol Registry & AST:
 
 Workspace Context:
 {workspaceContext}
+
+Relevant memories from previous interactions:
+{memoriesStr}
 
 Prerequisite Tasks Context:
 {taskContext}
@@ -533,6 +558,12 @@ def testerNode(state: AgentState) -> dict:
     isPass = testerMessage.strip().upper().startswith("PASS") and (not hasError if allRunTools else True)
     if isPass:
         print("\nProcess finished successfully.\n")
+    else:
+        try:
+            print("\n[MEMORY] Execution failed. Tester Agent is generating a lesson...")
+            memoryManager.learnFromFailure(state["instruction"], testOutput or testerMessage)
+        except Exception as e:
+            print(f"[MEMORY] Error generating lesson from failure: {e}")
 
     return {
         "messages": [testerResponse] if testerResponse else [],
@@ -561,6 +592,10 @@ evalWorkflow = evalBuilder.compile()
 
 def runCoder(instruction, taskContext="", feedback=""):
     context = getContext(instruction)
+    retrievedMemories = []
+    if shouldRetrieveMemory(instruction):
+        mems = memoryManager.searchMemory(instruction, topK=3)
+        retrievedMemories = [m["content"] for m in mems]
     initialState = {
         "messages": [HumanMessage(content=instruction)],
         "instruction": instruction,
@@ -570,7 +605,8 @@ def runCoder(instruction, taskContext="", feedback=""):
         "toolResults": [],
         "feedback": feedback if feedback else "No feedback yet. This is your first attempt.",
         "iteration": 0,
-        "success": False
+        "success": False,
+        "memories": retrievedMemories
     }
     return coderNode(initialState)
 
@@ -639,8 +675,16 @@ if __name__ == "__main__":
             indexWorkspace()
             print("Reindexed the workspace")
         elif q:
+            retrievedMemories = []
+            if shouldRetrieveMemory(query):
+                mems = memoryManager.searchMemory(query, topK=3)
+                retrievedMemories = [m["content"] for m in mems]
             promptAgent = PromptAgent()
             curQuery = query
+            if retrievedMemories:
+                mStr = "\n".join(f"- {m}" for m in retrievedMemories)
+                curQuery = f"{query}\n\nRelevant past memories/lessons:\n{mStr}"
+
             while True:
                 promptOutput = promptAgent.process(curQuery)
                 deliverables = promptOutput.get("deliverables", [])
@@ -671,5 +715,5 @@ if __name__ == "__main__":
             print(dag.topologicalSort())
 
             indexWorkspace()
-            scheduler = Scheduler(dag, query, techStack=techStack, coderFn=runCoder, evalFn=runBatchEval)
+            scheduler = Scheduler(dag, curQuery, techStack=techStack, coderFn=runCoder, evalFn=runBatchEval)
             asyncio.run(scheduler.run())

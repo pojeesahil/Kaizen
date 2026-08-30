@@ -10,6 +10,7 @@ os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 load_dotenv("secure.env")
+load_dotenv(".env.gcp")
 load_dotenv()
 
 gCreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")

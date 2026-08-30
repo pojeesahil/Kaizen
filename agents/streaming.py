@@ -19,7 +19,7 @@ thinkingSummaries = {
 
 
 class streamingPlanner:
-    def __init__(self, detector=None, resolver=None, planner=None, merger=None) -> None:
+    def __init__(self, detector = None, resolver = None, planner = None, merger = None) -> None:
         self.detector = detector or deliverableDetector()
         self.resolver = resolver or dependencyResolver()
         self.planner = planner or deliverablePlanner()
@@ -27,11 +27,11 @@ class streamingPlanner:
         self.lastResult = None
 
     def planStream(self, promptAgentOutput: Dict[str, Any]) -> Iterator[planningEvent]:
-        yield planningEvent(stage="understanding", icon="Thinking", message="Understanding request...")
+        yield planningEvent(stage = "understanding", icon = "Thinking", message = "Understanding request...")
 
         deliverablesList = self.detector.detect(promptAgentOutput)
-        yield planningEvent(stage="understanding", icon="OK", message=f"Detected {promptAgentOutput.get('project_type', 'project')}")
-        yield planningEvent(stage="understanding", icon="OK", message=f"Found {len(deliverablesList)} deliverable(s)")
+        yield planningEvent(stage = "understanding", icon = "OK", message = f"Detected {promptAgentOutput.get('project_type', 'project')}")
+        yield planningEvent(stage = "understanding", icon = "OK", message = f"Found {len(deliverablesList)} deliverable(s)")
 
         deliverablesList = self.resolver.resolve(deliverablesList)
 
@@ -59,11 +59,9 @@ class streamingPlanner:
         self.lastResult = mergedDagPlan
 
     streamPlan = planStream
-    stream_plan = planStream
 
     @staticmethod
     def _thinkingSummary(targetDeliverable: deliverable) -> str:
         return thinkingSummaries.get(targetDeliverable.kind, "Analysing requirements...")
-
 
 StreamingPlanner = streamingPlanner
