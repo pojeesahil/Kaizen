@@ -6,10 +6,11 @@ from core.config import get_llm, get_gemini_key, extract_text
 ANALYSIS_PROMPT = """You are an expert software architect. Analyze the following user request and break it down into a minimal set of coarse-grained, modular deliverables (typically 2 to 4 deliverables total).
 
 CRITICAL RULES:
-- Group all related functions, state, and logic into cohesive, file-level deliverables (e.g. "Game Engine / Logic", "Interactive UI / Main Loop", "Documentation").
+- Group all related functions, state, and logic into cohesive, file-level deliverables (e.g. "Core Data & Business Logic", "User Interface & Navigation", "Project Documentation").
+- When a multi-page website or multi-view application is requested, explicitly enumerate all major pages (e.g. Home, Products, Cart, Checkout, About, Contact) in the UI deliverable's requirements list.
 - NEVER create fragmented micro-deliverables (e.g. do NOT create separate deliverables for score, collision, movement, etc. — combine them into the core logic deliverable).
 - Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly requested.
-- NEVER create deliverables for environment setup, runtime/package installation (e.g. "Install Node.js", "Install npm"), or creating directories. Focus strictly on source code deliverables.
+- NEVER create deliverables for environment setup, runtime/package installation (e.g. "Install Node.js", "Install npm"), or creating directories. For JavaScript/TypeScript projects, always include root configuration files (package.json, tsconfig.json, index.html, vite.config.ts) as part of the scaffolding/setup deliverable, but do not execute package managers or shell installs. Focus strictly on source code and configuration deliverables.
 - For games, terminal apps, or CLI tools, specify a concrete, runnable framework (e.g. curses, turtle, tkinter, pygame, or rich).
 
 For each deliverable, provide:
@@ -17,7 +18,7 @@ For each deliverable, provide:
 - name: human-readable name
 - kind: a concise label (e.g. "core_logic", "ui", "readme")
 - goal: one-sentence description of what this deliverable accomplishes
-- requirements: list of specific things this deliverable needs or must support
+- requirements: list of specific things, pages, or components this deliverable needs or must support
 - dependencies: list of ids of OTHER deliverables in this list that must be built before this one.
 - priority: integer 1-5 where 1=highest (build first), 5=lowest (build last).
 

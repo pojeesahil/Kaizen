@@ -4,12 +4,14 @@ from typing import List, Optional, Any, Dict
 from agents.models import Deliverable, TaskNode, DeliverablePlan, newId, deliverable, taskNode, deliverablePlan
 from core.config import get_llm, get_gemini_key, extract_text
 
-TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a compact, coarse-grained list of implementation tasks (maximum 2-3 tasks per deliverable).
+TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a cohesive list of implementation tasks (typically 2 to 5 tasks per deliverable).
 
 RULES:
-- Do NOT generate fragmented micro-tasks. Group cohesive logic together.
+- For user interface or multi-page deliverables, create a dedicated task for each major page/view (e.g. HomePage, ProductListPage, CartPage, CheckoutPage, AboutPage) and a foundational routing/layout task. Never lump multiple distinct pages into a single overloaded task.
+- For backend or core logic deliverables, create dedicated tasks for data models, core services, and API handlers.
+- Do NOT generate micro-tasks for tiny UI elements (like individual buttons, headers, or style tweaks). Keep tasks scoped to complete files/pages/modules.
 - Focus strictly on concrete source files and functions needed for this deliverable.
-- Do NOT generate tasks for environment setup, installing tools (e.g. Node.js, npm, Python), running package installs, or creating directories. Focus exclusively on creating/updating source code files.
+- Do NOT generate tasks for environment setup, installing tools (e.g. Node.js, npm, Python), running package installs, or creating directories. For JavaScript/TypeScript projects, always generate tasks for root configuration files (package.json, tsconfig.json, index.html, vite.config.ts) to make the workspace buildable and runnable.
 
 Deliverable: {name}
 Kind: {kind}
@@ -17,7 +19,7 @@ Goal: {goal}
 Requirements: {requirements}
 
 For each task, provide:
-- objective: what the developer should do (one concise actionable sentence)
+- objective: what the developer should do (one concise actionable sentence specifying target files/pages)
 - output: what artifact or result this task produces
 - completion_criteria: how to verify this task is done
 
@@ -57,7 +59,7 @@ parseLlmJson = parseLLMjson
 
 INVALID_TASK_PATTERNS = (
     "install node", "install npm", "install python", "install express", "install dependency",
-    "create directory", "create folder", "create a new directory", "initialize project", "init npm",
+    "create directory", "create folder", "create a new directory",
     "start the server", "launch server", "run the server", "run server"
 )
 

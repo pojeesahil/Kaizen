@@ -78,22 +78,32 @@ class Scheduler:
 
         supportedExts = {
             ".py", ".js", ".ts", ".java", ".html", ".css", ".json",
-            ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".yaml", ".yml"
+            ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".yaml", ".yml", ".md"
         }
-        skipDirs = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out"}
+        skipDirs = {
+            "node_modules", "__pycache__", "venv", ".git", ".venv",
+            "chroma_db", "graphify-out", "dist", "build", ".next", ".nuxt", ".cache", "coverage"
+        }
+        skipFiles = {
+            "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "cargo.lock", "poetry.lock"
+        }
 
         parts = []
         for root, dirs, files in os.walk(self.workDir):
             dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
             for fname in sorted(files):
+                if fname in skipFiles or fname.endswith((".min.js", ".min.css", ".map", ".pack")):
+                    continue
                 ext = os.path.splitext(fname)[1].lower()
                 if ext not in supportedExts:
                     continue
                 fpath = os.path.join(root, fname)
+                if os.path.getsize(fpath) > 100000:
+                    continue
                 relpath = os.path.relpath(fpath, self.workDir)
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
+                        content = f.read(50000)
                     if content.strip():
                         parts.append(f"--- {relpath} ---\n{content}")
                 except Exception:

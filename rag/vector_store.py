@@ -8,7 +8,13 @@ SUPPORTED_EXTENSIONS = [
     ".html", ".css", ".json", ".yaml", ".yml", ".md"
 ]
 
-SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out", "graphify_out"}
+SKIP_DIRS = {
+    "node_modules", "__pycache__", "venv", ".git", ".venv",
+    "chroma_db", "graphify-out", "graphify_out", "dist", "build", ".next", ".nuxt", ".cache", "coverage"
+}
+SKIP_FILES = {
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "cargo.lock", "poetry.lock"
+}
 
 
 class VectorStore:
@@ -70,14 +76,18 @@ def read_and_chunk_codebase(path, chunk_size=40):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
 
         for fname in files:
+            if fname in SKIP_FILES or fname.endswith((".min.js", ".min.css", ".map", ".pack")):
+                continue
             ext = os.path.splitext(fname)[1].lower()
             if ext not in SUPPORTED_EXTENSIONS:
                 continue
 
             fpath = os.path.join(root, fname)
+            if os.path.getsize(fpath) > 100000:
+                continue
             try:
                 with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
+                    content = f.read(50000)
             except:
                 continue
 

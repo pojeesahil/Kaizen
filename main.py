@@ -134,17 +134,6 @@ def executeToolCalls(response, toolsList):
             else:
                 idx = start + 1
 
-    if not executed:
-        codeMatch = re.search(r"```(?:python|py|js|javascript|html)?\n(.*?)```", text, re.DOTALL)
-        if codeMatch:
-            rawCode = codeMatch.group(1).strip()
-            if rawCode:
-                targetFiles = [f for f in WORK_DIR.glob("*") if f.is_file() and not f.name.startswith(".")]
-                targetPath = targetFiles[0].name if targetFiles else "main.py"
-                if "editFile" in toolMap:
-                    res = toolMap["editFile"].invoke({"path": targetPath, "newContent": rawCode})
-                    executed.append(f"Auto-Recovered Code Block into {targetPath}: {res}")
-
     return executed
 
 coderTools = [
@@ -231,6 +220,7 @@ def coderNode(state: AgentState) -> dict:
     taskContext = state.get("taskContext", "") or "None"
     feedbackContext = state.get("feedback", "") or "None"
     workspaceContext = state.get("context", "") or "None"
+    initialAst = formatManifestContext(WORK_DIR)
 
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
 Your goal is to produce complete, connected, buildable, and runnable code.
@@ -264,6 +254,9 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
    - Keep all source files at the workspace root unless an explicit package structure is requested. Never split files between root and nested subdirectories.
    - All files created MUST match the project's target tech stack. Never create C/C++ files in a Python project or mix incompatible languages.
 11. {langGuideline}
+
+Workspace Symbol Registry & AST:
+{initialAst}
 
 Workspace Context:
 {workspaceContext}
@@ -335,21 +328,31 @@ def criticNode(state: AgentState) -> dict:
 
     manifestContext = formatManifestContext(WORK_DIR)
     workFileParts = []
-    skipDirs = {"node_modules", "__pycache__", "venv", ".git", ".venv", "chroma_db", "graphify-out"}
+    skipDirs = {
+        "node_modules", "__pycache__", "venv", ".git", ".venv",
+        "chroma_db", "graphify-out", "dist", "build", ".next", ".nuxt", ".cache", "coverage"
+    }
+    skipFiles = {
+        "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "cargo.lock", "poetry.lock"
+    }
     supportedExts = {".py", ".js", ".ts", ".java", ".html", ".css", ".json", ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".md"}
 
     if WORK_DIR.exists():
         for root, dirs, files in os.walk(WORK_DIR):
             dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
             for fname in sorted(files):
+                if fname in skipFiles or fname.endswith((".min.js", ".min.css", ".map", ".pack")):
+                    continue
                 ext = os.path.splitext(fname)[1].lower()
                 if ext not in supportedExts:
                     continue
                 fpath = Path(root) / fname
+                if fpath.stat().st_size > 100000:
+                    continue
                 rel = fpath.relative_to(WORK_DIR).as_posix()
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
+                        content = f.read(50000)
                     if content.strip():
                         workFileParts.append(f"--- {rel} ---\n{content}")
                 except Exception:
