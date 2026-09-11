@@ -244,21 +244,24 @@ def coderNode(state: AgentState) -> dict:
     memoriesList = state.get("memories", [])
     memoriesStr = "\n".join(f"- {m}" for m in memoriesList) if memoriesList else "None"
 
+    targetFilesMatch = re.search(r"planned file structure:\s*([^\n]+)", combinedText, re.IGNORECASE)
+    fileLayoutRule = f" Target Layout: {targetFilesMatch.group(1).strip()}. Follow this exact file structure." if targetFilesMatch else ""
+
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
 Your goal is to produce complete, connected, buildable, and runnable code.
 
-You operate in a ReAct loop (Thought -> Action -> Observation):
-1. Thought: Reason about what files or functions need to be inspected, written, or connected based on the live AST context.
-2. Action: Call the appropriate tool (readFile, createFile, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock).
-3. Observation: After each tool execution, you will receive the tool result and the updated live AST Symbol Registry of the workspace.
-4. Completion: When all code for your task is fully implemented with zero stubs or placeholders and all imports match existing AST signatures, respond with your final summary without calling any more tools.
+You operate in an Action-driven loop:
+1. Every turn, directly invoke the necessary tool (createFile, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock, readFile) to inspect or modify code.
+2. Never output conversational plans or text like 'I will also need to add...'. Execute the action via tool calls immediately.
+3. After each tool execution, you will observe the tool output and the updated live AST Symbol Registry.
+4. Completion: Only when all files are completely written with zero placeholders and all connections are verified, respond with a concise final summary.
 
 RULES:
 1. Always write production-grade, modular, maintainable code with clear separation of concerns.
 2. Split features into logical files/modules by responsibility; never put unrelated logic into one large file.
 3. Keep UI, business logic, API/services, data access, types, validation, and utilities separated where appropriate.
 Reuse existing modules, avoid duplication/circular dependencies, and don't over-engineer with unnecessary abstractions.
-4. Output ONLY valid tool calls matching the tool schemas in json format. Do NOT output markdown or explanations.
+4. Call tools directly. Do not narrate or list planned edits in conversational text.
 5. File Operations:
    - Use 'createFile' only for new files.
    - Use 'editFile', 'upsertFunction', 'upsertClass', 'addImport', 'appendToFile', or 'replaceBlock' to update existing files without breaking unrelated code.
@@ -273,7 +276,7 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
 9. FILE TARGETING:
    - Only modify files directly relevant to your current task objective. Do NOT touch unrelated files unless updating their imports/calls to match your changes.
 10. DIRECTORY LAYOUT & LANGUAGE PURITY:
-   - Keep all source files at the workspace root unless an explicit package structure is requested. Never split files between root and nested subdirectories.
+   - Keep all source files conforming to the planned layout.{fileLayoutRule}
    - All files created MUST match the project's target tech stack. Never create C/C++ files in a Python project or mix incompatible languages.
 11. {langGuideline}
 
@@ -685,11 +688,16 @@ if __name__ == "__main__":
                 mStr = "\n".join(f"- {m}" for m in retrievedMemories)
                 curQuery = f"{query}\n\nRelevant past memories/lessons:\n{mStr}"
 
+            existingAst = formatManifestContext(WORK_DIR)
+            if existingAst and "Workspace is currently empty" not in existingAst:
+                curQuery = f"{curQuery}\n\nExisting Workspace Code & Structure:\n{existingAst}"
+
             while True:
                 promptOutput = promptAgent.process(curQuery)
                 deliverables = promptOutput.get("deliverables", [])
                 techStack = promptOutput.get("tech_stack") or promptOutput.get("techStack") or ""
-                proceed, usrFeedback = reviewDeliverables(deliverables, techStack)
+                fileStructure = promptOutput.get("file_structure") or promptOutput.get("fileStructure") or []
+                proceed, usrFeedback = reviewDeliverables(deliverables, techStack, fileStructure)
                 if proceed:
                     break
                 curQuery = f"{query}\nUser Plan Feedback: {usrFeedback}"
@@ -715,5 +723,5 @@ if __name__ == "__main__":
             print(dag.topologicalSort())
 
             indexWorkspace()
-            scheduler = Scheduler(dag, curQuery, techStack=techStack, coderFn=runCoder, evalFn=runBatchEval)
+            scheduler = Scheduler(dag, curQuery, techStack=techStack, fileStructure=fileStructure, coderFn=runCoder, evalFn=runBatchEval)
             asyncio.run(scheduler.run())

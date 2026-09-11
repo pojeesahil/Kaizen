@@ -12,6 +12,8 @@ CRITICAL RULES:
 - Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly requested.
 - NEVER create deliverables for environment setup, runtime/package installation (e.g. "Install Node.js", "Install npm"), or creating directories. For JavaScript/TypeScript projects, always include root configuration files (package.json, tsconfig.json, index.html, vite.config.ts) as part of the scaffolding/setup deliverable, but do not execute package managers or shell installs. Focus strictly on source code and configuration deliverables.
 - For games, terminal apps, or CLI tools, specify a concrete, runnable framework (e.g. curses, turtle, tkinter, pygame, or rich).
+- Always define "file_structure": a list of all planned source code file paths for the project (e.g. ["main.py", "config.py", "game_state.py"]).
+- If existing workspace code or files are provided, treat this as an incremental update. Plan ONLY the new or modified deliverables needed without re-creating already implemented files.
 
 For each deliverable, provide:
 - id: a short identifier (e.g. "coreLogic", "gameUi", "readme")
@@ -25,6 +27,7 @@ For each deliverable, provide:
 Return ONLY a JSON object with this exact structure, no other text:
 {
   "tech_stack": "concise tech stack, e.g. Python (standard library / curses / pygame)",
+  "file_structure": ["path/to/file1.ext", "path/to/file2.ext"],
   "deliverables": [
     {
       "id": "...",
@@ -97,7 +100,7 @@ def fallbackDeliverable(userPrompt: str) -> List[Dict]:
         "priority": 3,
     }]
 
-def callLLMforDeliverables(userPrompt: str) -> tuple[List[Dict], str]:
+def callLLMforDeliverables(userPrompt: str) -> tuple[List[Dict], str, List[str]]:
     llm = getPlannerLLM()
     promptText = ANALYSIS_PROMPT + userPrompt.strip()
 
@@ -109,16 +112,18 @@ def callLLMforDeliverables(userPrompt: str) -> tuple[List[Dict], str]:
             deliverables = validateDeliverables(parsed)
             if deliverables:
                 techStack = str(parsed.get("tech_stack") or parsed.get("techStack") or "").strip()
-                return deliverables, techStack
+                rawFiles = parsed.get("file_structure") or parsed.get("fileStructure") or []
+                fileStruct = [str(f).strip() for f in rawFiles if f] if isinstance(rawFiles, list) else []
+                return deliverables, techStack, fileStruct
         except Exception as e:
             print(f"[PromptAgent] LLM call attempt {attempt + 1} failed: {e}")
 
     print("[PromptAgent] WARNING: LLM analysis failed, using fallback deliverable.")
-    return fallbackDeliverable(userPrompt), "Python / Standard Library"
+    return fallbackDeliverable(userPrompt), "Python / Standard Library", []
 
 class PromptAgent:
     def process(self, userPrompt: str) -> Dict:
-        deliverablesList, techStack = callLLMforDeliverables(userPrompt)
+        deliverablesList, techStack, fileStruct = callLLMforDeliverables(userPrompt)
         names = [d["name"] for d in deliverablesList]
         intent = f"Deliver: {', '.join(names)}" if names else "Unclear request"
         projectType = deliverablesList[0]["kind"] if deliverablesList else "unclassified"
@@ -145,6 +150,8 @@ class PromptAgent:
             "deliverables": deliverablesList,
             "tech_stack": techStack,
             "techStack": techStack,
+            "file_structure": fileStruct,
+            "fileStructure": fileStruct,
             "recommended_stack": {"primary": techStack} if techStack else {},
             "recommendedStack": {"primary": techStack} if techStack else {},
             "requirements": {"essential": [], "recommended": [], "optional": []},

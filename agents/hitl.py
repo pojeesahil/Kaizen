@@ -94,10 +94,15 @@ class HITLReview:
 
     edit_tasks = editTasks
 
-def reviewDeliverables(deliverables: list, techStack: str = "") -> tuple[bool, str]:
+def reviewDeliverables(deliverables: list, techStack: str = "", fileStructure: list = None) -> tuple[bool, str]:
     print("\nProposed Implementation Plan:")
     if techStack:
         print(f"Tech Stack: {techStack}\n")
+    if fileStructure:
+        print("Planned File Structure:")
+        for f in fileStructure:
+            print(f"  - {f}")
+        print()
     for idx, d in enumerate(deliverables, start=1):
         name = d.get("name", str(d)) if isinstance(d, dict) else getattr(d, "name", str(d))
         goal = d.get("goal", "") if isinstance(d, dict) else getattr(d, "goal", "")

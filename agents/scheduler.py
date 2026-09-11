@@ -9,10 +9,11 @@ from core.connectedness import formatManifestContext, validateConnectedness, aut
 
 class Scheduler:
 
-    def __init__(self, dag: DAG, goal: str = "", techStack: str = "", coderFn: Optional[Callable] = None, evalFn: Optional[Callable] = None):
+    def __init__(self, dag: DAG, goal: str = "", techStack: str = "", fileStructure: Optional[list] = None, coderFn: Optional[Callable] = None, evalFn: Optional[Callable] = None):
         self.dag = dag
         self.goal = goal
         self.techStack = techStack
+        self.fileStructure = fileStructure or []
         self.coderFn = coderFn
         self.evalFn = evalFn
         self.queue: list[tuple[int, str]] = []
@@ -49,6 +50,8 @@ class Scheduler:
             instParts.append(f"Overall Goal: {self.goal}")
         if self.techStack:
             instParts.append(f"Target Tech Stack: {self.techStack}")
+        if self.fileStructure:
+            instParts.append(f"Planned File Structure: {', '.join(self.fileStructure)}")
         instParts.append(f"Task: {tname}")
         instruction = "\n".join(instParts)
 
