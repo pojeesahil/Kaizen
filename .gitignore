@@ -12,3 +12,4 @@ rag/graph_visualize.py
 .github
 work
 gcp_key.json
+logs

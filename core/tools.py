@@ -23,6 +23,8 @@ def resolvePath(path: str) -> Path:
 def createFile(path: str, content: str) -> str:
     """Create a new file with specified content in the workspace."""
     filePath = resolvePath(path)
+    if "node_modules" in filePath.parts:
+        return f"Error: Modifying files inside node_modules is not allowed."
     filePath.parent.mkdir(parents=True, exist_ok=True)
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(content)
@@ -32,6 +34,8 @@ def createFile(path: str, content: str) -> str:
 def editFile(path: str, newContent: str) -> str:
     """Modify an existing file while automatically preserving existing imports."""
     filePath = resolvePath(path)
+    if "node_modules" in filePath.parts:
+        return f"Error: Modifying files inside node_modules is not allowed."
     filePath.parent.mkdir(parents=True, exist_ok=True)
     merged = newContent
     if filePath.exists() and filePath.suffix.lower() == ".py":
@@ -50,6 +54,8 @@ def editFile(path: str, newContent: str) -> str:
 def addImport(path: str, module: str, name: str = "", alias: str = "") -> str:
     """Insert an import statement at the top of a file without touching existing code."""
     filePath = resolvePath(path)
+    if "node_modules" in filePath.parts:
+        return f"Error: Modifying files inside node_modules is not allowed."
     filePath.parent.mkdir(parents=True, exist_ok=True)
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
@@ -419,6 +425,8 @@ def appendToFile(path: str, content: str) -> str:
 def replaceBlock(path: str, targetSnippet: str, replacementSnippet: str) -> str:
     """Replace an exact block or snippet in a file without touching the rest of the file."""
     filePath = resolvePath(path)
+    if "node_modules" in filePath.parts:
+        return f"Error: Modifying files inside node_modules is not allowed."
     if not filePath.exists():
         return f"Error: File {path} does not exist."
 
@@ -437,6 +445,8 @@ def replaceBlock(path: str, targetSnippet: str, replacementSnippet: str) -> str:
 def deleteResource(path: str) -> str:
     """Delete a specific file or folder from the workspace."""
     resPath = resolvePath(path)
+    if "node_modules" in resPath.parts:
+        return f"Error: Deleting inside node_modules is not allowed."
     if not resPath.exists():
         return f"Error: {path} not found."
     if resPath.is_dir():
@@ -450,6 +460,8 @@ def deleteResource(path: str) -> str:
 def readFile(path: str) -> str:
     """Read the full content of a file in the workspace."""
     filePath = resolvePath(path)
+    if "node_modules" in filePath.parts:
+        return f"Error: Reading files inside node_modules is not allowed."
     if not filePath.exists():
         return f"Error: File {path} does not exist."
     with open(filePath, "r", encoding="utf-8") as f:

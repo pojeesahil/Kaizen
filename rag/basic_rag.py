@@ -7,7 +7,21 @@ SUPPORTED_EXTENSIONS = [
     ".html", ".css", ".json", ".yaml", ".yml", ".md", "txt", "cs"
 ]
 
-SKIP_DIRS = {"__pycache__", "venv", ".git", ".venv"}
+SKIP_DIRS = {
+    "node_modules",
+    "__pycache__",
+    "venv",
+    ".git",
+    ".venv",
+    "chroma_db",
+    "graphify-out",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".cache",
+    "coverage"
+}
 
 
 class BasicRAG(RAGInterface):

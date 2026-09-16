@@ -5,7 +5,7 @@ from chromadb.utils import embedding_functions
 SUPPORTED_EXTENSIONS = [
     ".py", ".js", ".ts", ".java", ".kt", ".go",
     ".cpp", ".c", ".h", ".jsx", ".tsx",
-    ".html", ".css", ".json", ".yaml", ".yml", ".md"
+    ".html", ".css", ".json", ".yaml", ".yml", ".md", ".txt", ".svg"
 ]
 
 SKIP_DIRS = {

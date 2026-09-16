@@ -20,16 +20,19 @@ from core.tools import (
     replaceBlock,
     deleteResource,
     readFile,
+    executeCommand,
     WORK_DIR
 )
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
 from rag.rag import indexWorkspace, getContext
 from agents.prompt import PromptAgent
 from agents.planneragent import PlannerAgent
+from agents.patchclassifier import classifyIntent, buildPatchInstruction
 from agents.dag import DAG
 from agents.scheduler import Scheduler
 from agents.hitl import HITLReview, reviewDeliverables
 from core.memory import MemoryManager
+from core.logger import startLogging
 
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 
@@ -165,7 +168,11 @@ coderTools = [
     deleteResource,
     readFile
 ]
+testerTools = [
+    executeCommand
+]
 coderModel = llm.bind_tools(coderTools)
+testerModel = llm.bind_tools(testerTools)
 agentModel = llm.bind_tools(tools)
 
 def streamInvoke(model, messages):
@@ -201,7 +208,10 @@ def coderNode(state: AgentState) -> dict:
     taskContextLower = state.get("taskContext", "").lower()
     combinedText = f"{instLower} {taskContextLower}"
 
-    filesInWork = list(WORK_DIR.glob("*")) if WORK_DIR.exists() else []
+    filesInWork = [
+        f for f in WORK_DIR.glob("*")
+        if f.name != "node_modules" and not f.name.startswith(".")
+    ] if WORK_DIR.exists() else []
     exts = {f.suffix.lower() for f in filesInWork if f.is_file()}
 
     targetStackMatch = re.search(r"target tech stack:\s*([^\n]+)", combinedText, re.IGNORECASE)
@@ -247,9 +257,21 @@ def coderNode(state: AgentState) -> dict:
     targetFilesMatch = re.search(r"planned file structure:\s*([^\n]+)", combinedText, re.IGNORECASE)
     fileLayoutRule = f" Target Layout: {targetFilesMatch.group(1).strip()}. Follow this exact file structure." if targetFilesMatch else ""
 
+    isPatchMode = state["instruction"].strip().startswith("PATCH MODE")
+    patchModeDirective = ""
+    if isPatchMode:
+        patchModeDirective = (
+            "\nPATCH MODE ACTIVE:\n"
+            "- The user is asking you to fix or adjust something specific — NOT rebuild the project.\n"
+            "- Your first action MUST be to use readFile on the relevant file(s) before touching anything.\n"
+            "- Only edit the lines/functions that are broken. Leave all other working code untouched.\n"
+            "- Never use createFile for a file that already exists in the workspace.\n"
+            "- Never regenerate an entire module because one function inside it is broken.\n"
+        )
+
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
 Your goal is to produce complete, connected, buildable, and runnable code.
-
+{patchModeDirective}
 You operate in an Action-driven loop:
 1. Every turn, directly invoke the necessary tool (createFile, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock, readFile) to inspect or modify code.
 2. Never output conversational plans or text like 'I will also need to add...'. Execute the action via tool calls immediately.
@@ -326,11 +348,20 @@ QA Feedback to Address:
             for tr in toolResults
         )
 
+        finalNudge = (
+            f"Observation:\n{obsText}\n\nLive Workspace AST Context:\n{liveAst}\n\n"
+            "Reflect on the updated AST and tool output. "
+            "If further files, imports, or connections are needed to finish the task, take your next Action (tool call). "
+            "Otherwise, write a short summary of exactly what you changed and why — "
+            "list each file you touched and what you fixed or modified in it."
+            if isPatchMode else
+            f"Observation:\n{obsText}\n\nLive Workspace AST Context:\n{liveAst}\n\n"
+            "Reflect on the updated AST and tool output. If further files, imports, or connections are needed to finish the task, take your next Action (tool call). Otherwise, provide your final summary."
+        )
+
         coderMessages.extend([
             coderResponse,
-            HumanMessage(
-                content=f"Observation:\n{obsText}\n\nLive Workspace AST Context:\n{liveAst}\n\nReflect on the updated AST and tool output. If further files, imports, or connections are needed to finish the task, take your next Action (tool call). Otherwise, provide your final summary."
-            )
+            HumanMessage(content=finalNudge)
         ])
 
         if hasWriteTool and turn >= 2:
@@ -363,7 +394,7 @@ def criticNode(state: AgentState) -> dict:
     skipFiles = {
         "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "cargo.lock", "poetry.lock"
     }
-    supportedExts = {".py", ".js", ".ts", ".java", ".html", ".css", ".json", ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".md"}
+    supportedExts = {".py", ".js", ".ts", ".java", ".html", ".css", ".json", ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".md", ".txt", ".svg", ".yaml", ".yml"}
 
     if WORK_DIR.exists():
         for root, dirs, files in os.walk(WORK_DIR):
@@ -424,32 +455,52 @@ def testerNode(state: AgentState) -> dict:
 
     allFiles = []
     entryPoints = []
+    skipDirs = {
+        "node_modules",
+        "__pycache__",
+        "venv",
+        ".git",
+        ".venv",
+        "chroma_db",
+        "graphify-out",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        ".cache",
+        "coverage"
+    }
     if WORK_DIR.exists():
-        for root, _, files in os.walk(WORK_DIR):
+        for root, dirs, files in os.walk(WORK_DIR):
+            dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
             for fname in files:
-                if not fname.startswith("."):
-                    rel = Path(root).relative_to(WORK_DIR) / fname
-                    relStr = rel.as_posix()
-                    allFiles.append(relStr)
-                    if relStr.endswith(".py"):
-                        fpath = Path(root) / fname
-                        try:
-                            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                                content = f.read()
-                            if "if __name__" in content or "def main(" in content:
-                                entryPoints.append(relStr)
-                        except Exception:
-                            pass
-                    elif relStr == "index.html" or relStr.endswith("/index.html"):
-                        entryPoints.append(relStr)
-                    elif relStr in ("server.js", "app.js", "index.js", "main.js", "src/server.js", "src/app.js", "src/index.js"):
-                        entryPoints.append(relStr)
+                rel = Path(root).relative_to(WORK_DIR) / fname
+                relStr = rel.as_posix()
+                allFiles.append(relStr)
+                if relStr.endswith(".py"):
+                    fpath = Path(root) / fname
+                    try:
+                        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        if "if __name__" in content or "def main(" in content:
+                            entryPoints.append(relStr)
+                    except Exception:
+                        pass
+                elif relStr == "index.html" or relStr.endswith("/index.html"):
+                    entryPoints.append(relStr)
+                elif relStr in ("server.js", "app.js", "index.js", "main.js", "src/server.js", "src/app.js", "src/index.js"):
+                    entryPoints.append(relStr)
 
     filesStr = ", ".join(allFiles) if allFiles else "None"
     entryStr = ", ".join(entryPoints) if entryPoints else (allFiles[0] if allFiles else "None")
     manifestStr = formatManifestContext(WORK_DIR)
     hasPackages = any("/" in f for f in allFiles if f.endswith(".py"))
-    pyPathPrefix = f"set PYTHONPATH={WORK_DIR.resolve()} && " if os.name == "nt" else f"PYTHONPATH={WORK_DIR.resolve()} "
+    srcDir = WORK_DIR / "src"
+    pathSeparator = ";" if os.name == "nt" else ":"
+    if srcDir.exists():
+        pyPathPrefix = f"set PYTHONPATH={WORK_DIR.resolve()}{pathSeparator}{srcDir.resolve()} && " if os.name == "nt" else f"PYTHONPATH={WORK_DIR.resolve()}{pathSeparator}{srcDir.resolve()} "
+    else:
+        pyPathPrefix = f"set PYTHONPATH={WORK_DIR.resolve()} && " if os.name == "nt" else f"PYTHONPATH={WORK_DIR.resolve()} "
 
     runHints = []
     for ep in entryPoints:
@@ -467,7 +518,8 @@ def testerNode(state: AgentState) -> dict:
     runPretext = (
         "You are responsible for verifying code execution in the workspace.\n"
         "CRITICAL RULES:\n"
-        "- Output executeCommand tool calls to test and run the application.\n"
+        "- Output executeCommand tool calls ONLY to test and run the application.\n"
+        "- Do NOT attempt to modify, patch, or rewrite source code files using shell commands (e.g. sed, cat, echo, python -c with file writing, or powershell scripts).\n"
         "- Terminal CWD is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'.\n"
         f"- Files in workspace: [{filesStr}]\n"
         f"- Detected Entrypoints: [{entryStr}]\n"
@@ -476,9 +528,9 @@ def testerNode(state: AgentState) -> dict:
         f"- For Python packages (files inside subdirectories), ALWAYS use: {pyPathPrefix}python -m <package>.<module>\n"
         "- NEVER run a file inside a package directly like 'python subfolder/file.py' as it breaks package imports.\n"
         "- If an application requires interactive console input (input()), test non-interactively via import checks or piped inputs.\n"
-        "- If the app uses tkinter/pygame/GUI, run a non-interactive syntax+import check instead: python -c \"import <module>\"\n"
+        f"- If the app uses tkinter/pygame/GUI, run a non-interactive syntax+import check instead: {pyPathPrefix}python -c \"import <module>\"\n"
         "- If execution completes with Exit Code: 0 and no errors, respond strictly with 'PASS'.\n"
-        "- If execution crashes or throws errors, respond strictly with 'FAIL' followed by error details."
+        "- If execution crashes, throws errors, or fails, DO NOT try to fix the code. Respond strictly with 'FAIL' followed by complete traceback and error diagnostics so the Coder Agent can repair the files."
     )
 
     runMessages = [
@@ -493,9 +545,10 @@ def testerNode(state: AgentState) -> dict:
     for attempt in range(1, 4):
         if attempt > 1:
             print(f"\nTester retry {attempt}/3")
-        testerResponse = streamInvoke(agentModel, runMessages)
+        threadTesterModel = get_llm().bind_tools(testerTools)
+        testerResponse = streamInvoke(threadTesterModel, runMessages)
         testerMessage = extractText(testerResponse.content)
-        runTools = executeToolCalls(testerResponse, tools)
+        runTools = executeToolCalls(testerResponse, testerTools)
         if runTools:
             allRunTools.extend(runTools)
             for tr in runTools:
@@ -511,6 +564,12 @@ def testerNode(state: AgentState) -> dict:
         if runTools and hasZeroExit and not hasError:
             testerMessage = "PASS"
             print("\n[Tester] Application execution verified successfully (Exit Code: 0).")
+            break
+
+        if runTools and (hasError or not hasZeroExit):
+            if not testerMessage.strip().upper().startswith("FAIL"):
+                testerMessage = f"FAIL: Application execution failed with error:\n{testOutput}"
+            print("\n[Tester] Application execution failed. Delegating diagnostic to Coder Agent.")
             break
 
         if not runTools and not allRunTools:
@@ -543,6 +602,10 @@ def testerNode(state: AgentState) -> dict:
                 if hasZeroExit and not hasError:
                     testerMessage = "PASS"
                     break
+                else:
+                    testerMessage = f"FAIL: Application execution failed with error:\n{testOutput}"
+                    print("\n[Tester] Auto-execution failed. Delegating diagnostic to Coder Agent.")
+                    break
 
             runMessages.extend([
                 testerResponse,
@@ -552,7 +615,7 @@ def testerNode(state: AgentState) -> dict:
 
         runMessages.extend([
             testerResponse,
-            HumanMessage(content="Terminal output:\n" + "\n".join(allRunTools) + "\n\nEvaluate the output. If execution passed cleanly, respond strictly with PASS. If code logic bugs remain, respond with FAIL and details.")
+            HumanMessage(content="Terminal output:\n" + "\n".join(allRunTools) + "\n\nEvaluate the output. If execution passed cleanly, respond strictly with PASS. If code logic bugs or runtime errors occurred, respond strictly with FAIL and diagnostic details. Do not attempt to edit files.")
         ])
 
     testOutput = "\n".join(allRunTools)
@@ -597,8 +660,11 @@ def runCoder(instruction, taskContext="", feedback=""):
     context = getContext(instruction)
     retrievedMemories = []
     if shouldRetrieveMemory(instruction):
-        mems = memoryManager.searchMemory(instruction, topK=3)
-        retrievedMemories = [m["content"] for m in mems]
+        try:
+            mems = memoryManager.searchMemory(instruction, topK=3)
+            retrievedMemories = [m["content"] for m in mems]
+        except Exception:
+            retrievedMemories = []
     initialState = {
         "messages": [HumanMessage(content=instruction)],
         "instruction": instruction,
@@ -668,6 +734,7 @@ def runAgent(instruction, taskContext=""):
     return False, finalState.get("feedback", "Execution failed")
 
 if __name__ == "__main__":
+    startLogging()
     print("\nType 'index' for reindexing or 'exit' to quit.\n")
     while True:
         query = input("\nInstruction: ")
@@ -680,48 +747,71 @@ if __name__ == "__main__":
         elif q:
             retrievedMemories = []
             if shouldRetrieveMemory(query):
-                mems = memoryManager.searchMemory(query, topK=3)
-                retrievedMemories = [m["content"] for m in mems]
-            promptAgent = PromptAgent()
-            curQuery = query
-            if retrievedMemories:
-                mStr = "\n".join(f"- {m}" for m in retrievedMemories)
-                curQuery = f"{query}\n\nRelevant past memories/lessons:\n{mStr}"
+                try:
+                    mems = memoryManager.searchMemory(query, topK=3)
+                    retrievedMemories = [m["content"] for m in mems]
+                except Exception:
+                    retrievedMemories = []
 
-            existingAst = formatManifestContext(WORK_DIR)
-            if existingAst and "Workspace is currently empty" not in existingAst:
-                curQuery = f"{curQuery}\n\nExisting Workspace Code & Structure:\n{existingAst}"
+            mode = classifyIntent(query)
 
-            while True:
-                promptOutput = promptAgent.process(curQuery)
-                deliverables = promptOutput.get("deliverables", [])
-                techStack = promptOutput.get("tech_stack") or promptOutput.get("techStack") or ""
-                fileStructure = promptOutput.get("file_structure") or promptOutput.get("fileStructure") or []
-                proceed, usrFeedback = reviewDeliverables(deliverables, techStack, fileStructure)
-                if proceed:
-                    break
-                curQuery = f"{query}\nUser Plan Feedback: {usrFeedback}"
-                print("\nRegenerating plan based on your feedback...\n")
+            if mode == "patch":
+                print("\n[Kaizen] Patch mode detected, skipping full planning pipeline.\n")
+                indexWorkspace()
+                patchInstruction = buildPatchInstruction(query, WORK_DIR)
+                if retrievedMemories:
+                    memStr = "\n".join(f"- {m}" for m in retrievedMemories)
+                    patchInstruction = f"{patchInstruction}\n\nRelevant past lessons:\n{memStr}"
+                patchResult = runCoder(patchInstruction)
+                patchSummary = patchResult.get("coderMessage", "").strip() if isinstance(patchResult, dict) else ""
+                if patchSummary:
+                    print("\n" + "─" * 60)
+                    print("[Kaizen] Patch complete — here is what was changed:\n")
+                    print(patchSummary)
+                    print("─" * 60 + "\n")
+                else:
+                    print("\n[Kaizen] Patch complete.\n")
+            else:
+                promptAgent = PromptAgent()
+                curQuery = query
+                if retrievedMemories:
+                    mStr = "\n".join(f"- {m}" for m in retrievedMemories)
+                    curQuery = f"{query}\n\nRelevant past memories/lessons:\n{mStr}"
 
-            plannerAgent = PlannerAgent()
-            dagPlan = plannerAgent.plan(promptOutput)
-            dagPlan = HITLReview(dagPlan).run()
+                existingAst = formatManifestContext(WORK_DIR)
+                if existingAst and "Workspace is currently empty" not in existingAst:
+                    curQuery = f"{curQuery}\n\nExisting Workspace Code & Structure:\n{existingAst}"
 
-            dag = DAG()
-            for t in dagPlan.taskNodes:
-                t.name = getattr(t, "objective", t.id)
-                t.agent = "Coding"
-                dag.addTask(t)
-            dag.build()
+                while True:
+                    promptOutput = promptAgent.process(curQuery)
+                    deliverables = promptOutput.get("deliverables", [])
+                    techStack = promptOutput.get("tech_stack") or promptOutput.get("techStack") or ""
+                    fileStructure = promptOutput.get("file_structure") or promptOutput.get("fileStructure") or []
+                    proceed, usrFeedback = reviewDeliverables(deliverables, techStack, fileStructure)
+                    if proceed:
+                        break
+                    curQuery = f"{query}\nUser Plan Feedback: {usrFeedback}"
+                    print("\nRegenerating plan based on your feedback...\n")
 
-            print("\nGenerated Tasks:")
-            for task in dagPlan.taskNodes:
-                deps = ", ".join(task.dependencies) if task.dependencies else "none"
-                print(f" - [{task.priority}] {task.objective} (deps: {deps})")
+                plannerAgent = PlannerAgent()
+                dagPlan = plannerAgent.plan(promptOutput)
+                dagPlan = HITLReview(dagPlan).run()
 
-            print("\nExecution Order:")
-            print(dag.topologicalSort())
+                dag = DAG()
+                for t in dagPlan.taskNodes:
+                    t.name = getattr(t, "objective", t.id)
+                    t.agent = "Coding"
+                    dag.addTask(t)
+                dag.build()
 
-            indexWorkspace()
-            scheduler = Scheduler(dag, curQuery, techStack=techStack, fileStructure=fileStructure, coderFn=runCoder, evalFn=runBatchEval)
-            asyncio.run(scheduler.run())
+                print("\nGenerated Tasks:")
+                for task in dagPlan.taskNodes:
+                    deps = ", ".join(task.dependencies) if task.dependencies else "none"
+                    print(f" - [{task.priority}] {task.objective} (deps: {deps})")
+
+                print("\nExecution Order:")
+                print(dag.topologicalSort())
+
+                indexWorkspace()
+                scheduler = Scheduler(dag, curQuery, techStack=techStack, fileStructure=fileStructure, coderFn=runCoder, evalFn=runBatchEval)
+                asyncio.run(scheduler.run())

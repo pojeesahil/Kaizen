@@ -7,11 +7,12 @@ from core.config import get_llm, get_gemini_key, extract_text
 TASK_DECOMPOSITION_PROMPT = """You are an expert software engineer. Break down the following deliverable into a cohesive list of implementation tasks (typically 2 to 5 tasks per deliverable).
 
 RULES:
-- For user interface or multi-page deliverables, create a dedicated task for each major page/view (e.g. HomePage, ProductListPage, CartPage, CheckoutPage, AboutPage) and a foundational routing/layout task. Never lump multiple distinct pages into a single overloaded task.
-- For backend or core logic deliverables, create dedicated tasks for data models, core services, and API handlers.
-- Do NOT generate micro-tasks for tiny UI elements (like individual buttons, headers, or style tweaks). Keep tasks scoped to complete files/pages/modules.
-- Focus strictly on concrete source files and functions needed for this deliverable.
-- Do NOT generate tasks for environment setup, installing tools (e.g. Node.js, npm, Python), running package installs, or creating directories. For JavaScript/TypeScript projects, always generate tasks for root configuration files (package.json, tsconfig.json, index.html, vite.config.ts) to make the workspace buildable and runnable.
+- Single Responsibility per Task: Decompose deliverables into distinct architectural layers. Never combine data models, business logic services, and user interaction handlers into a single task.
+- Separation of Data vs Operations: If a feature requires data models and operations, split them into discrete tasks: (1) data models, schemas, and type definitions, (2) business logic, algorithms, and state mutations, (3) routing, controllers, or UI views.
+- Asset Batching: When assets, SVGs, or media files are required, NEVER lump all assets into a single generic task. Group them into explicit batches of 2 to 4 assets per task (e.g. 'Create Player & Laser SVGs: assets/player_ship.svg and assets/laser.svg', 'Create Alien Enemy SVGs: assets/alien_scout.svg and assets/alien_boss.svg', 'Create UI & VFX SVGs: assets/shield.svg, assets/explosion.svg, assets/powerup.svg').
+- Bounded Scope: Each task must be small enough to be fully implemented in 1-2 files (or 2-4 asset files) without placeholders, stubs, or unwritten methods.
+- Do NOT generate micro-tasks for tiny elements (like single buttons or styling tweaks). Keep tasks scoped to cohesive modules or complete files.
+- Focus strictly on concrete source files. Do NOT generate tasks for environment setup, runtime installs (Node, Python), or package manager commands. For web projects, include root configuration files (package.json, tsconfig.json, index.html) when necessary.
 
 Deliverable: {name}
 Kind: {kind}
@@ -119,27 +120,68 @@ class DeliverablePlanner:
 
     plan_deliverable = plan
 
+    def extractTargetFiles(self, text: str) -> List[str]:
+        cleaned = text.replace("`", "").replace("'", "").replace('"', "")
+        found = re.findall(
+            r"[\w/\\]+\.(?:py|js|ts|jsx|tsx|html|css|json|yaml|yml|txt|md)",
+            cleaned,
+            re.IGNORECASE
+        )
+        normalized = []
+        for item in found:
+            normPath = item.replace("\\", "/").lower()
+            if normPath not in normalized:
+                normalized.append(normPath)
+        return normalized
+
     def buildTaskChain(self, deliverable: Deliverable, llmTasks: List[dict], priority: int) -> List[TaskNode]:
         tasks: List[TaskNode] = []
-        previousId: Optional[str] = None
+        fileToLastTaskId: Dict[str, str] = {}
+        firstTaskId: Optional[str] = None
 
         for index, llmTask in enumerate(llmTasks, start=1):
             taskId = newId(f"{deliverable.id}-t{index}")
             isLast = index == len(llmTasks)
+            objectiveText = llmTask.get("objective", "")
+            targetFiles = self.extractTargetFiles(objectiveText)
+
+            taskDependencies: List[str] = []
+
+            if index == 1:
+                firstTaskId = taskId
+            else:
+                conflictingTaskIds = []
+                for fpath in targetFiles:
+                    if fpath in fileToLastTaskId:
+                        lastId = fileToLastTaskId[fpath]
+                        if lastId not in conflictingTaskIds:
+                            conflictingTaskIds.append(lastId)
+
+                if conflictingTaskIds:
+                    taskDependencies = conflictingTaskIds
+                elif firstTaskId:
+                    taskDependencies = [firstTaskId]
+
+            for fpath in targetFiles:
+                fileToLastTaskId[fpath] = taskId
+
+            parentTask = taskDependencies[0] if taskDependencies else None
+
             task = TaskNode(
                 id = taskId,
                 deliverableId = deliverable.id,
-                objective = llmTask["objective"],
+                objective = objectiveText,
                 output = llmTask.get("output", deliverable.name if isLast else f"step {index} for {deliverable.name}"),
-                completionCriteria = llmTask.get("completion_criteria", self.completionCriteria(llmTask["objective"], deliverable, isLast)),
-                parentTask = previousId,
-                dependencies = [previousId] if previousId else [],
+                completionCriteria = llmTask.get("completion_criteria", self.completionCriteria(objectiveText, deliverable, isLast)),
+                parentTask = parentTask,
+                dependencies = taskDependencies,
                 priority = priority
             )
-            if previousId:
-                attachChild(tasks, previousId, taskId)
+
+            for depId in taskDependencies:
+                attachChild(tasks, depId, taskId)
+
             tasks.append(task)
-            previousId = taskId
 
         return tasks
 

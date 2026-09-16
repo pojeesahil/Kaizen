@@ -17,14 +17,17 @@ class MemoryManager:
         )
 
     def searchMemory(self, query : str, topK : int = 5) -> list[dict]:
-        count = self.collection.count()
-        if count == 0:
-            return []
+        try:
+            count = self.collection.count()
+            if count == 0:
+                return []
 
-        results = self.collection.query(
-            query_texts = [query],
-            n_results = min(topK, count)
-        )
+            results = self.collection.query(
+                query_texts = [query],
+                n_results = min(topK, count)
+            )
+        except Exception as e:
+            return []
 
         records = []
         if results and results["documents"] and results["documents"][0]:

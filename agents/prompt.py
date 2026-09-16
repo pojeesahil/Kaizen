@@ -12,6 +12,7 @@ CRITICAL RULES:
 - Explicitly forbid generating speculative enterprise modules (like database migrations or separate auth microservices) unless explicitly requested.
 - NEVER create deliverables for environment setup, runtime/package installation (e.g. "Install Node.js", "Install npm"), or creating directories. For JavaScript/TypeScript projects, always include root configuration files (package.json, tsconfig.json, index.html, vite.config.ts) as part of the scaffolding/setup deliverable, but do not execute package managers or shell installs. Focus strictly on source code and configuration deliverables.
 - For games, terminal apps, or CLI tools, specify a concrete, runnable framework (e.g. curses, turtle, tkinter, pygame, or rich).
+- When a project requires creating custom SVG, audio, or graphical assets, explicitly list the specific asset groups in the requirements (e.g. 'Player ship and lasers: assets/player_ship.svg, assets/laser.svg', 'Enemy variants: assets/alien_scout.svg, assets/alien_boss.svg', 'VFX and HUD: assets/shield.svg, assets/explosion.svg, assets/powerup.svg') so the implementation planner can break them into manageable batches.
 - Always define "file_structure": a list of all planned source code file paths for the project (e.g. ["main.py", "config.py", "game_state.py"]).
 - If existing workspace code or files are provided, treat this as an incremental update. Plan ONLY the new or modified deliverables needed without re-creating already implemented files.
 

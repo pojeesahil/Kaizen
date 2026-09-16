@@ -53,6 +53,15 @@ class Scheduler:
         if self.fileStructure:
             instParts.append(f"Planned File Structure: {', '.join(self.fileStructure)}")
         instParts.append(f"Task: {tname}")
+
+        taskOutput = getattr(task, "output", "")
+        if taskOutput:
+            instParts.append(f"Required Artifacts: {taskOutput}")
+
+        taskCrit = getattr(task, "completionCriteria", "") or getattr(task, "completion_criteria", "")
+        if taskCrit:
+            instParts.append(f"Completion Criteria: {taskCrit}")
+
         instruction = "\n".join(instParts)
 
         feedback = self.taskFeedbacks.get(task.id, "")
@@ -62,18 +71,12 @@ class Scheduler:
         else:
             result = {"coderMessage": "Task executed", "toolResults": []}
 
-        autoFixImports(self.workDir)
-
-        isValid, errors = validateConnectedness(self.workDir)
-        if not isValid:
-            errText = "\n".join(f"- {e}" for e in errors)
-            print(f"\n[Post-Task AST Import Check Failed for '{tname}']:\n{errText}")
-            repairPrompt = f"Fix the following import and syntax errors in workspace files immediately:\n{errText}"
-            if self.coderFn:
-                result = self.coderFn(repairPrompt, taskContext=depContext, feedback=errText)
-            autoFixImports(self.workDir)
-
         return result
+
+    async def executeCoderThrottled(self, task, semaphore):
+        async with semaphore:
+            result = await asyncio.to_thread(self.executeCoder, task)
+        return task, result
 
     def readWorkspaceFiles(self) -> str:
         if not self.workDir.exists():
@@ -81,7 +84,7 @@ class Scheduler:
 
         supportedExts = {
             ".py", ".js", ".ts", ".java", ".html", ".css", ".json",
-            ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".yaml", ".yml", ".md"
+            ".jsx", ".tsx", ".go", ".cpp", ".c", ".h", ".yaml", ".yml", ".md", ".txt", ".svg"
         }
         skipDirs = {
             "node_modules", "__pycache__", "venv", ".git", ".venv",
@@ -127,10 +130,17 @@ class Scheduler:
                 _, taskId = heapq.heappop(self.queue)
                 batch.append(self.dag.tasks[taskId])
 
-            print(f"\nRunning {len(batch)} Coder Agent(s) Sequentially")
+            batchSize = len(batch)
+            runMode = "in Parallel" if batchSize > 1 else "Sequentially"
+            print(f"\nRunning {batchSize} Coder Agent(s) {runMode}")
+
+            semaphore = asyncio.Semaphore(3)
+            gathered = await asyncio.gather(
+                *(self.executeCoderThrottled(task, semaphore) for task in batch)
+            )
+
             coderResults = []
-            for task in batch:
-                result = await asyncio.to_thread(self.executeCoder, task)
+            for task, result in gathered:
                 coderResults.append(result)
                 toolResults = result.get("toolResults", [])
                 if toolResults:
@@ -142,7 +152,27 @@ class Scheduler:
                 self.taskOutputs[task.id] = coderMsg
                 self.taskFeedbacks.pop(task.id, None)
 
-                await asyncio.to_thread(indexWorkspace)
+            autoFixImports(self.workDir)
+            isValid, batchErrors = validateConnectedness(self.workDir)
+            if not isValid:
+                errText = "\n".join(f"- {e}" for e in batchErrors)
+                print(f"\n[Post-Batch AST Import Check Failed]:\n{errText}")
+                if self.coderFn:
+                    repairContext = ""
+                    manifestSnapshot = formatManifestContext(self.workDir)
+                    if manifestSnapshot:
+                        repairContext += f"\n\n{manifestSnapshot}"
+                    workSnapshot = self.readWorkspaceFiles()
+                    if workSnapshot:
+                        repairContext += "\n\nCurrent workspace file contents:\n" + workSnapshot
+                    repairPrompt = f"Fix the following import and syntax errors in workspace files immediately:\n{errText}"
+                    repairResult = await asyncio.to_thread(
+                        self.coderFn, repairPrompt, taskContext=repairContext, feedback=errText
+                    )
+                    coderResults.append(repairResult)
+                autoFixImports(self.workDir)
+
+            await asyncio.to_thread(indexWorkspace)
 
             completedTasks.extend(batch)
             allCoderResults.extend(coderResults)

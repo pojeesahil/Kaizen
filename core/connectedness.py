@@ -167,7 +167,21 @@ def buildSymbolManifest(workDir: Path) -> Dict[str, Any]:
     if not workDir.exists():
         return manifest
 
-    for root, _, files in os.walk(workDir):
+    skipDirs = {
+        "node_modules",
+        "__pycache__",
+        "venv",
+        ".git",
+        ".venv",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        ".cache",
+        "coverage"
+    }
+    for root, dirs, files in os.walk(workDir):
+        dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
         for fname in sorted(files):
             fpath = Path(root) / fname
             rel = fpath.relative_to(workDir).as_posix()
@@ -265,36 +279,57 @@ def mergePythonImports(oldCode: str, newCode: str) -> str:
     except Exception:
         return newCode
 
-    oldImportNodes = [n for n in oldTree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
-    newImportNodes = [n for n in newTree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+    oldImportNodes = [
+        item for item in oldTree.body
+        if isinstance(item, (ast.Import, ast.ImportFrom))
+    ]
+    newImportNodes = [
+        item for item in newTree.body
+        if isinstance(item, (ast.Import, ast.ImportFrom))
+    ]
 
-    newImportSignatures = set()
-    for n in newImportNodes:
-        if isinstance(n, ast.Import):
-            for alias in n.names:
-                newImportSignatures.add(f"import {alias.name}")
-        elif isinstance(n, ast.ImportFrom):
-            mod = n.module or ""
-            for alias in n.names:
-                newImportSignatures.add(f"from {mod} import {alias.name}")
+    newImportedNames = set()
+    for item in newImportNodes:
+        for alias in item.names:
+            newImportedNames.add(alias.asname or alias.name)
+
+    newDefinedNames = set()
+    for item in newTree.body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            newDefinedNames.add(item.name)
+        elif isinstance(item, ast.Assign):
+            for target in item.targets:
+                if isinstance(target, ast.Name):
+                    newDefinedNames.add(target.id)
+
+    usedNames = set()
+    for node in ast.walk(newTree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            usedNames.add(node.id)
 
     missingLines = []
-    for n in oldImportNodes:
-        if isinstance(n, ast.Import):
-            for alias in n.names:
-                sig = f"import {alias.name}"
-                if sig not in newImportSignatures:
+    addedSignatures = set()
+
+    for item in oldImportNodes:
+        if isinstance(item, ast.Import):
+            for alias in item.names:
+                importSymbol = alias.asname or alias.name
+                if importSymbol in usedNames and importSymbol not in newImportedNames and importSymbol not in newDefinedNames:
                     asPart = f" as {alias.asname}" if alias.asname else ""
-                    missingLines.append(f"import {alias.name}{asPart}")
-                    newImportSignatures.add(sig)
-        elif isinstance(n, ast.ImportFrom):
-            mod = n.module or ""
-            for alias in n.names:
-                sig = f"from {mod} import {alias.name}"
-                if sig not in newImportSignatures:
+                    sig = f"import {alias.name}{asPart}"
+                    if sig not in addedSignatures:
+                        missingLines.append(sig)
+                        addedSignatures.add(sig)
+        elif isinstance(item, ast.ImportFrom):
+            mod = item.module or ""
+            for alias in item.names:
+                importSymbol = alias.asname or alias.name
+                if importSymbol in usedNames and importSymbol not in newImportedNames and importSymbol not in newDefinedNames:
                     asPart = f" as {alias.asname}" if alias.asname else ""
-                    missingLines.append(f"from {mod} import {alias.name}{asPart}")
-                    newImportSignatures.add(sig)
+                    sig = f"from {mod} import {alias.name}{asPart}"
+                    if sig not in addedSignatures:
+                        missingLines.append(sig)
+                        addedSignatures.add(sig)
 
     if missingLines:
         return "\n".join(missingLines) + "\n" + newCode
@@ -308,7 +343,21 @@ def autoFixImports(workDir: Path) -> None:
     if not importMap:
         return
 
-    for root, _, files in os.walk(workDir):
+    skipDirs = {
+        "node_modules",
+        "__pycache__",
+        "venv",
+        ".git",
+        ".venv",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        ".cache",
+        "coverage"
+    }
+    for root, dirs, files in os.walk(workDir):
+        dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
         for fname in files:
             if not fname.endswith(".py"):
                 continue
@@ -341,7 +390,22 @@ def autoFixImports(workDir: Path) -> None:
                         importedSymbols.add(alias.asname or alias.name)
 
             for node in ast.walk(tree):
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        importedSymbols.add(alias.asname or alias.name)
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    definedSymbols.add(node.name)
+                    for arg in node.args.args:
+                        definedSymbols.add(arg.arg)
+                    for arg in getattr(node.args, "posonlyargs", []):
+                        definedSymbols.add(arg.arg)
+                    for arg in getattr(node.args, "kwonlyargs", []):
+                        definedSymbols.add(arg.arg)
+                    if node.args.vararg:
+                        definedSymbols.add(node.args.vararg.arg)
+                    if node.args.kwarg:
+                        definedSymbols.add(node.args.kwarg.arg)
+                elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                     usedSymbols.add(node.id)
 
             missingSymbols = usedSymbols - definedSymbols - importedSymbols - BUILTIN_NAMES - STDLIB_MODULES
@@ -379,10 +443,15 @@ def validateConnectedness(workDir: Path) -> Tuple[bool, List[str]]:
     manifest = buildSymbolManifest(workDir)
     errors = []
 
-    hasJsFiles = any(f.endswith((".js", ".ts", ".jsx", ".tsx", "package.json")) for f in manifest.keys())
-    pyFiles = {f: d for f, d in manifest.items() if f.endswith(".py")}
+    hasJsFiles = any(
+        f.endswith((".js", ".ts", ".jsx", ".tsx", "package.json"))
+        for f in manifest.keys()
+    )
+    pyFiles = {
+        f: d for f, d in manifest.items()
+        if f.endswith(".py")
+    }
 
-    # If it's a Node.js project, remove any empty scaffolded Python main.py if present
     if hasJsFiles:
         for pyName in ("main.py", "app.py"):
             pyPath = workDir / pyName
@@ -396,7 +465,29 @@ def validateConnectedness(workDir: Path) -> Tuple[bool, List[str]]:
                 except Exception:
                     pass
 
-    moduleMap = {Path(f).stem: (f, d) for f, d in pyFiles.items()}
+    moduleIndex = {}
+    packageIndex = set()
+
+    for rel, data in pyFiles.items():
+        parts = rel[:-3].split("/")
+        dotPath = ".".join(parts)
+        moduleIndex[dotPath] = (rel, data)
+
+        if parts[0] == "src" and len(parts) > 1:
+            srcRelative = ".".join(parts[1:])
+            moduleIndex[srcRelative] = (rel, data)
+
+        if parts[-1] == "__init__":
+            pkgParts = parts[:-1]
+            if pkgParts:
+                moduleIndex[".".join(pkgParts)] = (rel, data)
+                if pkgParts[0] == "src" and len(pkgParts) > 1:
+                    moduleIndex[".".join(pkgParts[1:])] = (rel, data)
+
+        for i in range(1, len(parts)):
+            packageIndex.add(".".join(parts[:i]))
+            if parts[0] == "src" and i > 1:
+                packageIndex.add(".".join(parts[1:i]))
 
     for rel, data in pyFiles.items():
         if data.get("syntaxError"):
@@ -408,21 +499,40 @@ def validateConnectedness(workDir: Path) -> Tuple[bool, List[str]]:
         for mod, symbols in data.get("fromImports", {}).items():
             if not mod or mod.startswith("."):
                 continue
+
             rootMod = mod.split(".")[0]
             if rootMod in STDLIB_MODULES:
                 continue
 
-            if rootMod in moduleMap:
-                targetRel, targetData = moduleMap[rootMod]
+            if mod in moduleIndex:
+                targetRel, targetData = moduleIndex[mod]
                 targetSymbols = set(targetData.get("functions", []))
-                targetSymNames = {f.split("(")[0].strip() for f in targetSymbols}
+                targetSymNames = {
+                    func.split("(")[0].strip()
+                    for func in targetSymbols
+                }
                 targetSymNames.update(targetData.get("classes", {}).keys())
                 targetSymNames.update(targetData.get("globals", []))
 
                 for sym in symbols:
-                    if sym != "*" and sym not in targetSymNames:
+                    if sym == "*":
+                        continue
+                    subModCandidate = f"{mod}.{sym}"
+                    if subModCandidate in moduleIndex or subModCandidate in packageIndex:
+                        continue
+                    if sym not in targetSymNames:
+                        availableList = sorted(list(targetSymNames))
                         errors.append(
-                            f"[{rel}] Broken Import: Symbol '{sym}' not found in '{targetRel}'. Available: {sorted(list(targetSymNames))}"
+                            f"[{rel}] Broken Import: Symbol '{sym}' not found in '{targetRel}'. Available: {availableList}"
+                        )
+            elif mod in packageIndex:
+                for sym in symbols:
+                    if sym == "*":
+                        continue
+                    subModCandidate = f"{mod}.{sym}"
+                    if subModCandidate not in moduleIndex and subModCandidate not in packageIndex:
+                        errors.append(
+                            f"[{rel}] Broken Import: Module '{sym}' not found in package '{mod}'."
                         )
 
     isValid = len(errors) == 0
