@@ -123,6 +123,7 @@ class Scheduler:
 
         completedTasks = []
         allCoderResults = []
+        halted = False
 
         while self.queue:
             batch = []
@@ -176,31 +177,41 @@ class Scheduler:
 
             completedTasks.extend(batch)
             allCoderResults.extend(coderResults)
-            self.loadReadyTasks()
 
-        if completedTasks:
             if self.evalFn:
-                passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults)
+                passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults)
                 if passed:
-                    print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+                    print(f"\n[Milestone Verification] Batch of {batchSize} task(s) verified successfully.")
                 else:
-                    for retry in range(1, 4):
-                        print(f"\n[Kaizen Repair {retry}/3] Triggering Coder Agent to fix verification failure...")
+                    repaired = False
+                    for repair in range(1, 11):
+                        print(f"\n[Milestone Repair {repair}/10] Triggering Coder Agent to fix verification failure...")
                         repairPrompt = (
                             f"Overall Goal: {self.goal}\n"
                             f"Target Tech Stack: {self.techStack}\n\n"
-                            f"The project implementation failed verification with the following Critic/Tester feedback:\n{fb}\n\n"
-                            "Inspect the current workspace files and use tool calls (createFile, editFile, upsertFunction, upsertClass) to implement the missing components and resolve all issues."
+                            f"The project failed milestone verification after the latest batch of tasks.\n"
+                            f"Critic/Tester feedback:\n{fb}\n\n"
+                            "Inspect the current workspace files and use tool calls (createFile, editFile, upsertFunction, upsertClass) to fix all issues so the application runs correctly."
                         )
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=fb)
+                        coderResults.append(fixRes)
                         allCoderResults.append(fixRes)
                         await asyncio.to_thread(indexWorkspace)
 
-                        passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults)
+                        passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults)
                         if passed:
-                            print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+                            print(f"\n[Milestone Repair] Repair {repair} succeeded. Continuing to next batch.")
+                            repaired = True
                             break
-                    else:
-                        print(f"\n[Kaizen] Verification could not be resolved after 3 repair attempts.\n")
-            else:
-                print("\n[Kaizen] All plan tasks executed.\n")
+                    if not repaired:
+                        print(f"\n[Kaizen] Milestone verification could not be resolved after 10 repair attempts. Halting pipeline.")
+                        halted = True
+                        break
+
+            self.loadReadyTasks()
+
+        if halted:
+            print("\n[Kaizen] Pipeline halted due to unresolvable milestone failure.\n")
+        elif completedTasks:
+            print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+

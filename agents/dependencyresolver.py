@@ -13,10 +13,13 @@ class dependencyResolver:
                 LLMidToActualMap[parts[0]] = d.id
 
         def isDoc(item: deliverable) -> bool:
-            return any(
-                k in item.kind.lower() or k in item.name.lower()
-                for k in ("readme", "doc", "documentation")
-            )
+            kindVal = item.kind.lower()
+            nameVal = item.name.lower()
+            if kindVal in ("setup", "scaffold", "scaffolding", "infra", "infrastructure", "foundation"):
+                return False
+            if any(term in nameVal for term in ("setup", "scaffold", "scaffolding", "foundation")):
+                return False
+            return kindVal in ("readme", "doc", "documentation")
 
         codeDeliverableIds = [d.id for d in deliverablesList if not isDoc(d)]
 

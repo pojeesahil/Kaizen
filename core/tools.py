@@ -1,7 +1,9 @@
 import os
 import re
 import ast
+import time
 import shutil
+import threading
 import subprocess
 from pathlib import Path
 from langchain_core.tools import tool
@@ -29,6 +31,37 @@ def createFile(path: str, content: str) -> str:
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(content)
     return f"Success: Created file at {filePath}"
+
+@tool
+def createFiles(files: dict) -> str:
+    """Create multiple files at once in the workspace using a dictionary mapping relative file paths to their content."""
+    createdPaths = []
+    failedPaths = []
+    for relPath, content in files.items():
+        try:
+            filePath = resolvePath(str(relPath))
+            if "node_modules" in filePath.parts:
+                failedPaths.append(f"{relPath}: modifying node_modules is not allowed")
+                continue
+            filePath.parent.mkdir(parents=True, exist_ok=True)
+            with open(filePath, "w", encoding="utf-8") as f:
+                f.write(str(content))
+            createdPaths.append(str(filePath))
+        except Exception as err:
+            failedPaths.append(f"{relPath}: {str(err)}")
+    resultMessage = ""
+    if createdPaths:
+        joinedCreated = "\n".join(createdPaths)
+        resultMessage += f"Success: Created {len(createdPaths)} file(s):\n{joinedCreated}"
+    if failedPaths:
+        joinedFailed = "\n".join(failedPaths)
+        resultMessage += f"\nErrors:\n{joinedFailed}"
+    return resultMessage
+
+@tool
+def finishTask(summary: str) -> str:
+    """Explicitly declare that all task requirements, files, and connections are fully implemented and verified."""
+    return f"Task Completed: {summary.strip()}"
 
 @tool
 def editFile(path: str, newContent: str) -> str:
@@ -467,6 +500,65 @@ def readFile(path: str) -> str:
     with open(filePath, "r", encoding="utf-8") as f:
         return f.read()
 
+def isGuiApplication(command: str, workDir: Path) -> bool:
+    guiLibraries = [
+        "pygame",
+        "tkinter",
+        "pyqt",
+        "pyside",
+        "kivy",
+        "arcade",
+        "electron",
+        "tauri",
+        "javafx",
+        "swing",
+        "raylib",
+        "sfml",
+        "glfw",
+        "sdl",
+        "ebiten",
+        "fyne",
+        "iced",
+        "egui",
+        "bevy",
+        "gtk",
+        "qt",
+        "imgui"
+    ]
+    lowerCommand = command.lower()
+    for lib in guiLibraries:
+        if lib in lowerCommand:
+            return True
+    if not workDir.exists():
+        return False
+    sourceExtensions = [
+        ".py",
+        ".js",
+        ".ts",
+        ".cpp",
+        ".c",
+        ".h",
+        ".hpp",
+        ".java",
+        ".go",
+        ".rs",
+        ".cs"
+    ]
+    for rootPath, dirNames, fileNames in os.walk(workDir):
+        for fileName in fileNames:
+            fileExtension = Path(fileName).suffix.lower()
+            if fileExtension in sourceExtensions:
+                filePath = Path(rootPath) / fileName
+                try:
+                    with open(filePath, "r", encoding="utf-8", errors="ignore") as fileHandle:
+                        fileContent = fileHandle.read().lower()
+                        for lib in guiLibraries:
+                            if lib in fileContent:
+                                return True
+                except Exception:
+                    pass
+    return False
+
 @tool
 def executeCommand(command: str) -> str:
     """Execute a shell command inside the workspace directory."""
@@ -477,9 +569,6 @@ def executeCommand(command: str) -> str:
 
     try:
         WORK_DIR.mkdir(parents=True, exist_ok=True)
-        cmdLower = command.lower()
-        isAppRun = "python " in cmdLower or "node " in cmdLower or "flask " in cmdLower
-        cmdTimeout = 8 if isAppRun else 30
 
         proc = subprocess.Popen(
             command,
@@ -490,16 +579,51 @@ def executeCommand(command: str) -> str:
             text=True
         )
 
-        try:
-            stdoutData, stderrData = proc.communicate(timeout=cmdTimeout)
-            output = f"Exit Code: {proc.returncode}\n"
-            if stdoutData:
-                output += f"STDOUT:\n{stdoutData}\n"
-            if stderrData:
-                output += f"STDERR:\n{stderrData}\n"
-            return output
+        capturedStdout = []
+        capturedStderr = []
+        isReady = threading.Event()
+        readinessMarkers = (
+            "http://", "https://", "localhost", "127.0.0.1",
+            "ready in", "listening on", "serving at", "compiled successfully"
+        )
 
-        except subprocess.TimeoutExpired:
+        def readStream(stream, targetList, checkReady=False):
+            try:
+                for line in iter(stream.readline, ""):
+                    targetList.append(line)
+                    if checkReady and any(m in line.lower() for m in readinessMarkers):
+                        isReady.set()
+            except Exception:
+                pass
+
+        tOut = threading.Thread(target=readStream, args=(proc.stdout, capturedStdout, True))
+        tErr = threading.Thread(target=readStream, args=(proc.stderr, capturedStderr, False))
+        tOut.daemon = True
+        tErr.daemon = True
+        tOut.start()
+        tErr.start()
+
+        isGui = isGuiApplication(command, WORK_DIR)
+        livenessTimeout = 3.0
+        if not isGui:
+            livenessTimeout = 15.0
+
+        startTime = time.time()
+        while True:
+            elapsedTime = time.time() - startTime
+            if proc.poll() is not None:
+                break
+            if isReady.is_set():
+                time.sleep(0.3)
+                break
+            if elapsedTime >= livenessTimeout:
+                break
+            time.sleep(0.1)
+
+        processRunning = proc.poll() is None
+        totalDuration = time.time() - startTime
+
+        if processRunning:
             if os.name == 'nt' and proc.pid:
                 subprocess.run(
                     f"taskkill /F /T /PID {proc.pid}",
@@ -510,23 +634,53 @@ def executeCommand(command: str) -> str:
             else:
                 proc.kill()
 
-            stdoutData, stderrData = proc.communicate()
-            stdoutText = stdoutData or ""
-            stderrText = stderrData or ""
-            hasError = "Traceback" in stderrText or "Error:" in stderrText or "SyntaxError" in stderrText
+        stdoutText = "".join(capturedStdout)
+        stderrText = "".join(capturedStderr)
+        hasError = False
+        errorMarkers = [
+            "Traceback",
+            "Error:",
+            "SyntaxError",
+            "Exception:"
+        ]
+        for marker in errorMarkers:
+            if marker in stderrText:
+                hasError = True
+                break
 
-            if not hasError:
+        if isGui:
+            if processRunning and not hasError:
                 output = "Exit Code: 0 (Process started successfully)\n"
                 if stdoutText:
                     output += f"STDOUT:\n{stdoutText}\n"
                 return output
-            return f"Error: Command '{command}' timed out with errors:\n{stderrText}"
+            if not processRunning and totalDuration < 2.0:
+                output = "Exit Code: 1 (GUI application exited prematurely)\n"
+                if stdoutText:
+                    output += f"STDOUT:\n{stdoutText}\n"
+                if stderrText:
+                    output += f"STDERR:\n{stderrText}\n"
+                return output
+
+        if isReady.is_set() or (processRunning and not hasError):
+            output = "Exit Code: 0 (Process started successfully)\n"
+            if stdoutText:
+                output += f"STDOUT:\n{stdoutText}\n"
+            return output
+
+        output = f"Exit Code: {proc.returncode}\n"
+        if stdoutText:
+            output += f"STDOUT:\n{stdoutText}\n"
+        if stderrText:
+            output += f"STDERR:\n{stderrText}\n"
+        return output
 
     except Exception as e:
         return f"Error executing command: {str(e)}"
 
 tools = [
     createFile,
+    createFiles,
     editFile,
     addImport,
     upsertFunction,
@@ -535,5 +689,6 @@ tools = [
     replaceBlock,
     deleteResource,
     readFile,
+    finishTask,
     executeCommand
 ]
