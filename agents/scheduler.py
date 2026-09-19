@@ -191,7 +191,7 @@ class Scheduler:
                             f"Target Tech Stack: {self.techStack}\n\n"
                             f"The project failed milestone verification after the latest batch of tasks.\n"
                             f"Critic/Tester feedback:\n{fb}\n\n"
-                            "Inspect the current workspace files and use tool calls (createFile, editFile, upsertFunction, upsertClass) to fix all issues so the application runs correctly."
+                            "Inspect the current workspace files and use tool calls (createFile, editFile, upsertFunction, upsertClass, searchWeb) to fix all issues so the application runs correctly."
                         )
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=fb)
                         coderResults.append(fixRes)

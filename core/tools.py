@@ -7,6 +7,7 @@ import threading
 import subprocess
 from pathlib import Path
 from langchain_core.tools import tool
+from ddgs import DDGS
 from core.connectedness import mergePythonImports
 
 WORK_DIR = Path(__file__).resolve().parent.parent / "work"
@@ -501,6 +502,32 @@ def readFile(path: str) -> str:
         return f.read()
 
 def isGuiApplication(command: str, workDir: Path) -> bool:
+    lowerCommand = command.lower().strip()
+    commandParts = lowerCommand.replace("-", " ").replace("=", " ").split()
+    setupKeywords = [
+        "install",
+        "pip",
+        "pip3",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "cargo",
+        "composer",
+        "gem",
+        "bundle",
+        "version",
+        "which",
+        "where",
+        "list",
+        "clean",
+        "download",
+        "fetch",
+        "git"
+    ]
+    for kw in setupKeywords:
+        if kw in commandParts:
+            return False
     guiLibraries = [
         "pygame",
         "tkinter",
@@ -678,6 +705,23 @@ def executeCommand(command: str) -> str:
     except Exception as e:
         return f"Error executing command: {str(e)}"
 
+@tool
+def searchWeb(query: str) -> str:
+    """Search the web using DuckDuckGo for documentation, API usage, examples, and error solutions."""
+    try:
+        searchHits = list(DDGS().text(query, max_results=5))
+        if not searchHits:
+            return "No search results found."
+        formattedResults = []
+        for item in searchHits:
+            title = item.get("title", "")
+            link = item.get("href", "")
+            body = item.get("body", "")
+            formattedResults.append(f"Title: {title}\nURL: {link}\nSnippet: {body}")
+        return "\n\n".join(formattedResults)
+    except Exception as err:
+        return f"Error searching web: {err}"
+
 tools = [
     createFile,
     createFiles,
@@ -689,6 +733,7 @@ tools = [
     replaceBlock,
     deleteResource,
     readFile,
+    searchWeb,
     finishTask,
     executeCommand
 ]

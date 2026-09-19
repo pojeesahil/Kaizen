@@ -181,7 +181,6 @@ def summary(deliverablesList: List[Dict[str, Any]]) -> str:
     return f"Deliver: {', '.join(names)}" if names else "Unclear request"
 
 if __name__ == "__main__":
-    import json as _json
     agent = PromptAgent()
     example = "Create a README, Dockerfile, and a login page with authentication, offline only"
-    print(_json.dumps(agent.process(example), indent = 2))
+    print(json.dumps(agent.process(example), indent = 2))

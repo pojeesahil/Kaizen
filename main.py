@@ -22,6 +22,7 @@ from core.tools import (
     replaceBlock,
     deleteResource,
     readFile,
+    searchWeb,
     finishTask,
     executeCommand,
     WORK_DIR
@@ -93,6 +94,27 @@ def sanitizeCommand(cmd: str) -> str:
                 cleanedParts.append(part)
         return " && ".join(cleanedParts) if cleanedParts else "echo Standard library module available by default"
     return cmd
+
+def extractCommand(toolRecord: str) -> str:
+    if "command='" in toolRecord:
+        return toolRecord.split("command='", 1)[1].split("'", 1)[0].strip()
+    if 'command="' in toolRecord:
+        return toolRecord.split('command="', 1)[1].split('"', 1)[0].strip()
+    return ""
+
+def isSetupCommand(cmd: str) -> bool:
+    lowerCmd = cmd.lower().strip()
+    cleaned = lowerCmd.replace("-", " ").replace("=", " ")
+    tokens = cleaned.split()
+    setupWords = ["install", "add", "get", "update", "download", "version", "which", "where"]
+    for w in setupWords:
+        if w in tokens:
+            return True
+    prefixes = ["pip ", "npm ", "yarn ", "pnpm ", "cargo ", "gem ", "bundle "]
+    for p in prefixes:
+        if p in lowerCmd:
+            return True
+    return False
 
 def executeToolCalls(response, toolsList):
     toolMap = {t.name: t for t in toolsList}
@@ -184,6 +206,7 @@ coderTools = [
     replaceBlock,
     deleteResource,
     readFile,
+    searchWeb,
     finishTask
 ]
 testerTools = [
@@ -292,7 +315,7 @@ def coderNode(state: AgentState) -> dict:
 Your goal is to produce complete, connected, buildable, and runnable code.
 {patchModeDirective}
 You operate in an Action-driven loop:
-1. Every turn, directly invoke the necessary tool (createFile, createFiles, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock, readFile, finishTask) to inspect or modify code.
+1. Every turn, directly invoke the necessary tool (createFile, createFiles, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock, readFile, searchWeb, finishTask) to inspect or modify code.
 2. When creating multiple related files (such as SVGs, models, or configurations), use 'createFiles' to write all files together in a single batch call.
 3. Never output conversational plans or text like 'I will also need to add...'. Execute the action via tool calls immediately.
 4. After each tool execution, you will observe the tool output and the updated live AST Symbol Registry.
@@ -806,21 +829,19 @@ def testerNode(state: AgentState) -> dict:
             for tr in runTools:
                 print(tr, "\n")
 
-        testOutput = "\n".join(allRunTools)
-        hasZeroExit = "Exit Code: 0" in testOutput
-        hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
-
-        executedCommands = []
+        appRunTools = []
+        setupRunTools = []
         for tr in allRunTools:
-            cmdMatch = re.search(r"command=['\"](.*?)['\"]", tr, re.DOTALL)
-            if cmdMatch:
-                executedCommands.append(cmdMatch.group(1).strip().lower())
+            extractedCmd = extractCommand(tr)
+            if extractedCmd and isSetupCommand(extractedCmd):
+                setupRunTools.append(tr)
+            elif extractedCmd:
+                appRunTools.append(tr)
 
-        setupPatterns = [
-            r"\binstall\b", r"\badd\b", r"\bget\b", r"\bupdate\b", r"\bdownload\b",
-            r"\b--version\b", r"\b-v\b", r"\bversion\b", r"\bwhich\b", r"\bwhere\b"
-        ]
-        hasRunApp = any(not any(re.search(pat, cmd) for pat in setupPatterns) for cmd in executedCommands)
+        hasRunApp = len(appRunTools) > 0
+        appOutput = "\n".join(appRunTools)
+        hasZeroExit = "Exit Code: 0" in appOutput
+        hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput
 
         if hasRunApp and hasZeroExit and not hasError:
             testerMessage = "PASS"
@@ -828,14 +849,17 @@ def testerNode(state: AgentState) -> dict:
             break
 
         if hasRunApp and (hasError or not hasZeroExit):
-            testerMessage = f"FAIL: Application execution failed with error:\n{testOutput}"
+            testerMessage = f"FAIL: Application execution failed with error:\n{appOutput}"
             print("\n[Tester] Application execution failed. Delegating diagnostic to Coder Agent.")
             break
 
         if testerMessage.strip().upper().startswith("PASS") and hasRunApp:
             break
 
-        if not runTools and not allRunTools:
+        recentCmds = [extractCommand(tr) for tr in runTools]
+        onlySetupRun = bool(runTools) and all(isSetupCommand(c) for c in recentCmds if c)
+
+        if (not runTools and not hasRunApp) or onlySetupRun:
             if entryPoints:
                 targetEntry = entryPoints[0]
                 ext = Path(targetEntry).suffix.lower()
@@ -858,21 +882,27 @@ def testerNode(state: AgentState) -> dict:
                     autoCmd = f"python {targetEntry}"
                 print(f"\n[Tester Execution Proposal] {autoCmd}")
                 autoRes = executeCommand.invoke({"command": autoCmd})
-                allRunTools.append(f"Auto-Execution: command='{autoCmd}' | {autoRes}")
-                testOutput = "\n".join(allRunTools)
-                hasZeroExit = "Exit Code: 0" in testOutput
-                hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
+                autoRecord = f"Auto-Execution: command='{autoCmd}' | {autoRes}"
+                allRunTools.append(autoRecord)
+                appRunTools.append(autoRecord)
+                appOutput = "\n".join(appRunTools)
+                hasRunApp = True
+                hasZeroExit = "Exit Code: 0" in appOutput
+                hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput
                 if hasZeroExit and not hasError:
                     testerMessage = "PASS"
                     break
                 else:
-                    testerMessage = f"FAIL: Application execution failed with error:\n{testOutput}"
+                    testerMessage = f"FAIL: Application execution failed with error:\n{appOutput}"
                     print("\n[Tester] Auto-execution failed. Delegating diagnostic to Coder Agent.")
                     break
 
+            promptNote = f"Output an executeCommand tool call to run the application [{hintsStr}]."
+            if onlySetupRun:
+                promptNote = f"Dependencies installed. Now execute the application entrypoint: [{hintsStr}]."
             runMessages.extend([
                 testerResponse,
-                HumanMessage(content=f"You did not call any tools. Output an executeCommand tool call to verify runtime or run the application [{hintsStr}].")
+                HumanMessage(content=promptNote)
             ])
             continue
 
@@ -881,10 +911,11 @@ def testerNode(state: AgentState) -> dict:
             HumanMessage(content="Terminal output:\n" + "\n".join(allRunTools) + "\n\nIf dependency installation succeeded, now execute the application entrypoint. If execution already passed cleanly, respond strictly with PASS. If code logic bugs remain, respond strictly with FAIL and diagnostic details.")
         ])
 
-    testOutput = "\n".join(allRunTools)
-    hasZeroExit = "Exit Code: 0" in testOutput
-    hasError = "Traceback" in testOutput or "Error:" in testOutput or "Exception:" in testOutput
-    isPass = testerMessage.strip().upper().startswith("PASS") and (not hasError if allRunTools else True)
+    appRunTools = [tr for tr in allRunTools if extractCommand(tr) and not isSetupCommand(extractCommand(tr))]
+    appOutput = "\n".join(appRunTools)
+    hasZeroExit = "Exit Code: 0" in appOutput
+    hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput
+    isPass = bool(appRunTools) and hasZeroExit and not hasError
     if isPass:
         if currentManifestHashes:
             verifiedManifestHashes.update(currentManifestHashes)
@@ -892,13 +923,13 @@ def testerNode(state: AgentState) -> dict:
     else:
         try:
             print("\n[MEMORY] Execution failed. Tester Agent is generating a lesson...")
-            memoryManager.learnFromFailure(state["instruction"], testOutput or testerMessage)
+            memoryManager.learnFromFailure(state["instruction"], appOutput or "\n".join(allRunTools) or testerMessage)
         except Exception as e:
             print(f"[MEMORY] Error generating lesson from failure: {e}")
 
     return {
         "messages": [testerResponse] if testerResponse else [],
-        "feedback": state["feedback"] if isPass else f"Tester Execution Failed:\n{testerMessage}",
+        "feedback": state["feedback"] if isPass else f"Tester Execution Failed:\n{appOutput or testerMessage}",
         "success": isPass
     }
 

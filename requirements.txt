@@ -13,3 +13,4 @@ python-dotenv
 chromadb
 networkx
 graphifyy
+ddgs
