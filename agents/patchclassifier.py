@@ -23,45 +23,18 @@ Instruction: {instruction}
 
 Reply:"""
 
-FALLBACK_PATCH_SIGNALS = (
-    "fix", "not working", "broken", "bug", "wrong", "incorrect",
-    "patch", "repair", "dont work", "not work", "doesnt", "doesn't",
-    "isn't", "failing", "crashes", "error in", "problem with",
-    "issue with", "tweak", "adjust", "still broken", "already exists",
-    "already have", "update the existing", "just fix", "just change"
-)
-
-FALLBACK_BUILD_SIGNALS = (
-    "build", "create", "generate", "make", "write", "implement",
-    "scaffold", "set up", "initialize", "start a", "from scratch",
-    "new project", "build me", "create a new"
-)
-
-
-def _keywordFallback(instruction: str) -> str:
-    lowered = instruction.lower().strip()
-    buildHits = sum(1 for sig in FALLBACK_BUILD_SIGNALS if sig in lowered)
-    patchHits = sum(1 for sig in FALLBACK_PATCH_SIGNALS if sig in lowered)
-    if patchHits > 0 and buildHits == 0:
-        return "patch"
-    if patchHits > buildHits:
-        return "patch"
-    return "build"
-
-
 def classifyIntent(instruction: str) -> str:
-    try:
-        from core.config import get_llm, get_gemini_key, extract_text
-        llm = get_llm(api_key=get_gemini_key("1"), temperature=0)
-        promptText = INTENT_PROMPT.format(instruction=instruction.strip())
-        response = llm.invoke(promptText)
-        rawText = extract_text(response.content if hasattr(response, "content") else response)
-        result = rawText.strip().lower().split()[0] if rawText.strip() else ""
-        if result in ("patch", "build"):
-            return result
-    except Exception:
-        pass
-    return _keywordFallback(instruction)
+    from core.config import get_llm, get_gemini_key, extract_text
+    llm = get_llm(api_key=get_gemini_key("1"), temperature=0)
+    promptText = INTENT_PROMPT.format(instruction=instruction.strip())
+    response = llm.invoke(promptText)
+    rawText = extract_text(response.content if hasattr(response, "content") else response)
+    tokens = rawText.strip().lower().split()
+    for token in tokens:
+        cleaned = re.sub(r"[^\w]", "", token)
+        if cleaned in ("patch", "build"):
+            return cleaned
+    return "build"
 
 
 def readWorkspaceFiles(workDir: Path, maxBytes: int = 60000) -> str:

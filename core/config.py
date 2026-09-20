@@ -8,6 +8,8 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("langchain_google_genai").setLevel(logging.ERROR)
+logging.getLogger("langchain_google_vertexai").setLevel(logging.ERROR)
 
 load_dotenv("secure.env")
 load_dotenv(".env.gcp")
@@ -34,8 +36,8 @@ def extract_text(content) -> str:
                 parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 parts.append(block["text"])
-            elif hasattr(block, "text"):
-                parts.append(block.text)
+            else:
+                parts.append(str(block))
         return "\n".join(parts)
     return str(content)
 
