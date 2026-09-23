@@ -1,4 +1,5 @@
 from agents.models import DAGPlan, TaskNode, newId
+from core.config import autoApprove
 
 class HITLReview:
     def __init__(self, dagPlan: DAGPlan):
@@ -6,12 +7,16 @@ class HITLReview:
         self.dag_plan = dagPlan
 
     def run(self) -> DAGPlan:
-        while True:
-            tasks = self.dagPlan.taskNodes
-            print("\nPlan Review")
-            for idx, task in enumerate(tasks, start=1):
-                print(f"  {idx}. {task.objective}")
+        tasks = self.dagPlan.taskNodes
+        print("\nPlan Review")
+        for idx, task in enumerate(tasks, start=1):
+            print(f"  {idx}. {task.objective}")
 
+        if autoApprove:
+            print("\n[Auto-Approve] Plan tasks approved. Starting execution...\n")
+            return self.dagPlan
+
+        while True:
             print("\nOptions:")
             print("  [a] Approve and run")
             print("  [e] Edit tasks")
@@ -113,6 +118,10 @@ def reviewDeliverables(deliverables: list, techStack: str = "", fileStructure: l
     print("  [p] Proceed with plan")
     print("  [c] Change / adjust plan")
 
+    if autoApprove:
+        print("\n[Auto-Approve] Implementation plan approved.\n")
+        return True, ""
+
     while True:
         choice = input("\nEnter choice (p/c): ").strip().lower()
         if choice == "p":
@@ -124,8 +133,13 @@ def reviewDeliverables(deliverables: list, techStack: str = "", fileStructure: l
             print("Enter 'p' to proceed or 'c' to change.")
 
 def finalReview() -> str:
-    print("\n--- Final Review ---")
+    print("\n[Final Review]")
     print("Code is written and tested.")
+
+    if autoApprove:
+        print("\n[Auto-Approve] Final review accepted.\n")
+        return "accept"
+
     print("  [a] Accept")
     print("  [r] Reject")
 

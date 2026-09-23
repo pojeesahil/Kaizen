@@ -6,6 +6,36 @@ from typing import Callable, Optional
 from agents.dag import DAG
 from rag.rag import indexWorkspace
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
+from langchain_core.messages import HumanMessage
+from core.config import get_llm
+
+def runPreRepairTriage(feedback: str, techStack: str = "") -> str:
+    trimmedFeedback = feedback.strip()
+    lowerFb = trimmedFeedback.lower()
+    if "critic feedback" in lowerFb or ("tester execution failed" not in lowerFb and "exit code:" not in lowerFb):
+        return ""
+    if "tester execution failed:" in lowerFb:
+        idx = lowerFb.find("tester execution failed:")
+        trimmedFeedback = trimmedFeedback[idx + len("tester execution failed:"):].strip()
+    if len(trimmedFeedback) > 3000:
+        trimmedFeedback = trimmedFeedback[:1500] + "\n...\n" + trimmedFeedback[-1500:]
+    prompt = (
+        f"A project build or verification failed with output:\n{trimmedFeedback}\n\n"
+        f"Tech stack: {techStack}\n\n"
+        "Diagnose the failure:\n"
+        "1. Identify the root failure category (e.g. Compiler/Build Configuration, Missing Type Definitions/Dependencies, Syntax/Import Error, Application Runtime Defect).\n"
+        "2. Identify the specific file(s) or manifests that should be adjusted (e.g. tsconfig, package manifest, build tool config, or source code).\n"
+        "3. Provide direct, non-speculative instruction on the exact fix needed.\n"
+        "Keep the response concise and actionable."
+    )
+    try:
+        response = get_llm().invoke([HumanMessage(content=prompt)])
+        content = response.content
+        if isinstance(content, list):
+            return "".join(p if isinstance(p, str) else p.get("text", "") for p in content).strip()
+        return str(content).strip()
+    except Exception:
+        return ""
 
 class Scheduler:
 
@@ -111,7 +141,7 @@ class Scheduler:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read(50000)
                     if content.strip():
-                        parts.append(f"--- {relpath} ---\n{content}")
+                        parts.append(f"[File: {relpath}]\n{content}")
                 except Exception:
                     continue
 
@@ -179,39 +209,70 @@ class Scheduler:
             allCoderResults.extend(coderResults)
 
             if self.evalFn:
-                passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults)
+                passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults, False)
                 if passed:
-                    print(f"\n[Milestone Verification] Batch of {batchSize} task(s) verified successfully.")
+                    print(f"\n[Milestone Review] Batch of {batchSize} task(s) approved by Critic.")
                 else:
                     repaired = False
                     for repair in range(1, 11):
-                        print(f"\n[Milestone Repair {repair}/10] Triggering Coder Agent to fix verification failure...")
+                        print(f"\n[Milestone Repair {repair}/10] Triggering Coder Agent to fix Critic feedback...")
                         repairPrompt = (
                             f"Overall Goal: {self.goal}\n"
                             f"Target Tech Stack: {self.techStack}\n\n"
-                            f"The project failed milestone verification after the latest batch of tasks.\n"
-                            f"Critic/Tester feedback:\n{fb}\n\n"
-                            "Inspect the current workspace files and use tool calls (createFile, editFile, upsertFunction, upsertClass, searchWeb) to fix all issues so the application runs correctly."
+                            f"The latest batch of tasks failed Critic review.\n"
+                            f"Critic feedback:\n{fb}\n\n"
+                            "Inspect the current workspace files and use tool calls (createFile, createFiles, editFile, replaceBlock, upsertFunction, upsertClass, appendToFile, grepFiles, searchWeb) to fix all issues."
                         )
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=fb)
                         coderResults.append(fixRes)
                         allCoderResults.append(fixRes)
                         await asyncio.to_thread(indexWorkspace)
 
-                        passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults)
+                        passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults, False)
                         if passed:
                             print(f"\n[Milestone Repair] Repair {repair} succeeded. Continuing to next batch.")
                             repaired = True
                             break
                     if not repaired:
-                        print(f"\n[Kaizen] Milestone verification could not be resolved after 10 repair attempts. Halting pipeline.")
+                        print("\n[Kaizen] Milestone review could not be resolved after 10 repair attempts. Halting pipeline.")
                         halted = True
                         break
 
             self.loadReadyTasks()
 
-        if halted:
+        if completedTasks and not halted:
+            if self.evalFn:
+                passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults, True)
+                if passed:
+                    print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
+                else:
+                    for repair in range(1, 11):
+                        print(f"\n[Verification Repair {repair}/10] Triggering Coder Agent to fix verification failure...")
+                        triageDiagnosis = runPreRepairTriage(fb, self.techStack)
+                        if triageDiagnosis:
+                            print(f"\n[Pre-Repair Triage]:\n{triageDiagnosis}\n")
+                        triageSection = f"Pre-Repair Triage Analysis:\n{triageDiagnosis}\n\n" if triageDiagnosis else ""
+                        repairPrompt = (
+                            f"Overall Goal: {self.goal}\n"
+                            f"Target Tech Stack: {self.techStack}\n\n"
+                            f"The project failed verification after all tasks completed.\n"
+                            f"Critic/Tester feedback:\n{fb}\n\n"
+                            f"{triageSection}"
+                            "Inspect the current workspace files and use tool calls (createFile, createFiles, editFile, replaceBlock, upsertFunction, upsertClass, appendToFile, grepFiles, searchWeb) to fix all issues so the application runs correctly."
+                        )
+                        enhancedFb = f"{fb}\n\n[Pre-Repair Triage Analysis]:\n{triageDiagnosis}" if triageDiagnosis else fb
+                        fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=enhancedFb)
+                        allCoderResults.append(fixRes)
+                        await asyncio.to_thread(indexWorkspace)
+
+                        passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults, True)
+                        if passed:
+                            print(f"\n[Verification Repair] Repair {repair} succeeded.")
+                            break
+                    else:
+                        print("\n[Kaizen] Verification could not be resolved after 10 repair attempts.\n")
+            else:
+                print("\n[Kaizen] All plan tasks executed.\n")
+        elif halted:
             print("\n[Kaizen] Pipeline halted due to unresolvable milestone failure.\n")
-        elif completedTasks:
-            print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
 

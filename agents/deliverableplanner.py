@@ -15,7 +15,7 @@ RULES:
 - Closed Topology & Navigation Invariants: When planning tasks for multi-map, multi-scene, or multi-view systems, each location or view must explicitly include both inbound and outbound transitions to other nodes in the navigation graph so that no map or view becomes a disconnected dead end.
 - Bounded Scope: Each task must be small enough to be fully implemented in 1-2 files (or 2-4 asset files) without placeholders, stubs, or unwritten methods.
 - Do NOT generate micro-tasks for tiny elements (like single buttons or styling tweaks). Keep tasks scoped to cohesive modules or complete files.
-- Focus strictly on concrete source files. Do NOT generate tasks for environment setup, runtime installs (Node, Python), or package manager commands. For web projects, include root configuration files (package.json, tsconfig.json, index.html) when necessary.
+- Focus strictly on concrete source files. Do NOT generate tasks for environment setup, runtime installs (Node, Python), or package manager commands. For web projects, include root configuration files (package.json, tsconfig.json, index.html) when necessary. For Vite projects, index.html is the entry point and must always reside at the subproject root (e.g. client/index.html), never inside public/.
 
 Deliverable: {name}
 Kind: {kind}

@@ -15,6 +15,9 @@ load_dotenv("secure.env")
 load_dotenv(".env.gcp")
 load_dotenv()
 
+autoApprove = os.getenv("AUTO_APPROVE", "false").lower() in ("true", "1", "yes")
+AUTO_APPROVE = autoApprove
+
 gCreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if gCreds:
     credsPath = Path(gCreds)
