@@ -5,12 +5,23 @@ import time
 import shutil
 import threading
 import subprocess
+import urllib.request
 from pathlib import Path
 from langchain_core.tools import tool
 from ddgs import DDGS
 from core.connectedness import mergePythonImports
+from core.config import autoApprove
 
 WORK_DIR = Path(__file__).resolve().parent.parent / "work"
+
+def syncCag(filePath: Path):
+    try:
+        from cag.cag import updateCagFile
+        updateCagFile(str(filePath), baseDir=str(WORK_DIR))
+    except Exception:
+        pass
+
+_syncCAG = syncCag
 
 def resolvePath(path: str) -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,6 +42,7 @@ def createFile(path: str, content: str) -> str:
     filePath.parent.mkdir(parents=True, exist_ok=True)
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(content)
+    syncCag(filePath)
     return f"Success: Created file at {filePath}"
 
 @tool
@@ -47,6 +59,7 @@ def createFiles(files: dict) -> str:
             filePath.parent.mkdir(parents=True, exist_ok=True)
             with open(filePath, "w", encoding="utf-8") as f:
                 f.write(str(content))
+            syncCag(filePath)
             createdPaths.append(str(filePath))
         except Exception as err:
             failedPaths.append(f"{relPath}: {str(err)}")
@@ -58,6 +71,36 @@ def createFiles(files: dict) -> str:
         joinedFailed = "\n".join(failedPaths)
         resultMessage += f"\nErrors:\n{joinedFailed}"
     return resultMessage
+
+@tool
+def downloadAsset(url: str, path: str) -> str:
+    """Download an asset or file from a URL to a specified workspace path."""
+    try:
+        dest = resolvePath(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = resp.read()
+        with open(dest, "wb") as f:
+            f.write(data)
+        syncCag(dest)
+        return f"Success: Downloaded {url} to {dest}"
+    except Exception as err:
+        return f"Error downloading asset from '{url}': {err}"
+
+@tool
+def moveFile(sourcePath: str, destinationPath: str) -> str:
+    """Move or rename a file or directory from sourcePath to destinationPath in the workspace."""
+    try:
+        src = resolvePath(sourcePath)
+        dst = resolvePath(destinationPath)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        syncCag(src)
+        syncCag(dst)
+        return f"Success: Moved {src} to {dst}"
+    except Exception as err:
+        return f"Error moving file: {err}"
 
 @tool
 def finishTask(summary: str) -> str:
@@ -82,41 +125,8 @@ def editFile(path: str, newContent: str) -> str:
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(merged)
+    syncCag(filePath)
     return f"Success: Modified file at {filePath}"
-
-@tool
-def addImport(path: str, module: str, name: str = "", alias: str = "") -> str:
-    """Insert an import statement at the top of a file without touching existing code."""
-    filePath = resolvePath(path)
-    if "node_modules" in filePath.parts:
-        return f"Error: Modifying files inside node_modules is not allowed."
-    filePath.parent.mkdir(parents=True, exist_ok=True)
-    if not filePath.exists():
-        with open(filePath, "w", encoding="utf-8") as f:
-            f.write("")
-
-    with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
-        src = f.read()
-
-    importLine = f"from {module} import {name}" if name else f"import {module}"
-    if alias:
-        importLine += f" as {alias}"
-
-    if importLine in src:
-        return f"Success: Import '{importLine}' already present in {filePath}"
-
-    lines = src.splitlines(keepends=True)
-    insertIdx = 0
-    for i, line in enumerate(lines):
-        if line.startswith(("import ", "from ")):
-            insertIdx = i + 1
-        elif line.strip() and not line.startswith("#") and insertIdx > 0:
-            break
-
-    lines.insert(insertIdx, importLine + "\n")
-    with open(filePath, "w", encoding="utf-8") as f:
-        f.writelines(lines)
-    return f"Success: Added import '{importLine}' to {filePath}"
 
 def findBalancedBlock(src: str, openBraceIdx: int) -> int:
     depth = 0
@@ -249,6 +259,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(functionCode.strip() + "\n")
+        syncCag(filePath)
         names = ", ".join(n.name for n in fnNodes) if fnNodes else "function"
         return f"Success: Created {filePath} with function(s) '{names}'"
 
@@ -322,6 +333,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
 
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(src)
+        syncCag(filePath)
         return f"Success: Upserted function(s) '{', '.join(processedNames)}' in {filePath}"
 
     # Universal non-Python or regex-based replacement
@@ -338,6 +350,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
     if replaced:
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(newSrc)
+        syncCag(filePath)
         return f"Success: Modified existing function '{fnName}' in-place in {filePath}"
 
     spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
@@ -345,6 +358,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(src)
+    syncCag(filePath)
     return f"Success: Added function '{fnName}' to {filePath}"
 
 @tool
@@ -365,6 +379,7 @@ def upsertClass(path: str, classCode: str) -> str:
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(classCode.strip() + "\n")
+        syncCag(filePath)
         names = ", ".join(n.name for n in clsNodes) if clsNodes else "class"
         return f"Success: Created {filePath} with class(es) '{names}'"
 
@@ -408,6 +423,7 @@ def upsertClass(path: str, classCode: str) -> str:
 
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(src)
+        syncCag(filePath)
         return f"Success: Upserted class(es) '{', '.join(processedNames)}' in {filePath}"
 
     # Universal non-Python or regex-based replacement
@@ -421,6 +437,7 @@ def upsertClass(path: str, classCode: str) -> str:
     if replaced:
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(newSrc)
+        syncCag(filePath)
         return f"Success: Modified existing class '{clsName}' in-place in {filePath}"
 
     spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
@@ -428,6 +445,7 @@ def upsertClass(path: str, classCode: str) -> str:
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(src)
+    syncCag(filePath)
     return f"Success: Added class '{clsName}' to {filePath}"
 
 @tool
@@ -448,11 +466,13 @@ def appendToFile(path: str, content: str) -> str:
         newBody = f"{prefix}\n\n{content.strip()}\n\n{mainBlock}\n"
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(newBody)
+        syncCag(filePath)
         return f"Success: Appended content before main entrypoint in {filePath}"
 
     spacing = "\n\n" if existing and not existing.endswith("\n\n") else "\n" if existing and not existing.endswith("\n") else ""
     with open(filePath, "a", encoding="utf-8") as f:
         f.write(spacing + content.strip() + "\n")
+    syncCag(filePath)
     return f"Success: Appended content to {filePath}"
 
 @tool
@@ -473,21 +493,24 @@ def replaceBlock(path: str, targetSnippet: str, replacementSnippet: str) -> str:
     updated = content.replace(targetSnippet, replacementSnippet, 1)
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(updated)
+    syncCag(filePath)
     return f"Success: Replaced block in {filePath}"
 
 @tool
 def deleteResource(path: str) -> str:
     """Delete a specific file or folder from the workspace."""
     resPath = resolvePath(path)
-    if "node_modules" in resPath.parts:
+    if "node_modules" in resPath.parts and resPath.name != "node_modules":
         return f"Error: Deleting inside node_modules is not allowed."
     if not resPath.exists():
         return f"Error: {path} not found."
     if resPath.is_dir():
         shutil.rmtree(resPath)
+        syncCag(resPath)
         return f"Success: Deleted folder {resPath}"
     else:
         resPath.unlink()
+        syncCag(resPath)
         return f"Success: Deleted file {resPath}"
 
 @tool
@@ -501,97 +524,85 @@ def readFile(path: str) -> str:
     with open(filePath, "r", encoding="utf-8") as f:
         return f.read()
 
-def isGuiApplication(command: str, workDir: Path) -> bool:
-    lowerCommand = command.lower().strip()
-    commandParts = lowerCommand.replace("-", " ").replace("=", " ").split()
-    setupKeywords = [
-        "install",
-        "pip",
-        "pip3",
-        "npm",
-        "npx",
-        "yarn",
-        "pnpm",
-        "cargo",
-        "composer",
-        "gem",
-        "bundle",
-        "version",
-        "which",
-        "where",
-        "list",
-        "clean",
-        "download",
-        "fetch",
-        "git"
-    ]
-    for kw in setupKeywords:
-        if kw in commandParts:
-            return False
-    guiLibraries = [
-        "pygame",
-        "tkinter",
-        "pyqt",
-        "pyside",
-        "kivy",
-        "arcade",
-        "electron",
-        "tauri",
-        "javafx",
-        "swing",
-        "raylib",
-        "sfml",
-        "glfw",
-        "sdl",
-        "ebiten",
-        "fyne",
-        "iced",
-        "egui",
-        "bevy",
-        "gtk",
-        "qt",
-        "imgui"
-    ]
-    lowerCommand = command.lower()
-    for lib in guiLibraries:
-        if lib in lowerCommand:
-            return True
-    if not workDir.exists():
-        return False
-    sourceExtensions = [
-        ".py",
-        ".js",
-        ".ts",
-        ".cpp",
-        ".c",
-        ".h",
-        ".hpp",
-        ".java",
-        ".go",
-        ".rs",
-        ".cs"
-    ]
-    for rootPath, dirNames, fileNames in os.walk(workDir):
-        for fileName in fileNames:
-            fileExtension = Path(fileName).suffix.lower()
-            if fileExtension in sourceExtensions:
-                filePath = Path(rootPath) / fileName
-                try:
-                    with open(filePath, "r", encoding="utf-8", errors="ignore") as fileHandle:
-                        fileContent = fileHandle.read().lower()
-                        for lib in guiLibraries:
-                            if lib in fileContent:
-                                return True
-                except Exception:
-                    pass
-    return False
+@tool
+def grepFiles(query: str, path: str = ".") -> str:
+    """Search for matching lines of text or symbols across workspace files without reading entire files."""
+    targetPath = resolvePath(path)
+    if not targetPath.exists():
+        return f"Error: Path '{path}' does not exist."
+
+    skipDirs = {
+        "node_modules",
+        "__pycache__",
+        "venv",
+        ".git",
+        ".venv",
+        "chroma_db",
+        "graphify-out",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        ".cache",
+        "coverage"
+    }
+
+    matchedLines = []
+    maxMatches = 50
+
+    if targetPath.is_file():
+        filesToSearch = [targetPath]
+    else:
+        filesToSearch = []
+        for root, dirs, files in os.walk(targetPath):
+            dirs[:] = [d for d in dirs if d not in skipDirs and not d.startswith(".")]
+            for fname in sorted(files):
+                filePath = Path(root) / fname
+                filesToSearch.append(filePath)
+
+    for filePath in filesToSearch:
+        if "node_modules" in filePath.parts:
+            continue
+        try:
+            relStr = filePath.relative_to(WORK_DIR).as_posix()
+        except Exception:
+            relStr = filePath.as_posix()
+        try:
+            with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
+                for lineNum, line in enumerate(f, 1):
+                    if query in line:
+                        matchedLines.append(f"{relStr}:{lineNum}: {line.strip()}")
+                        if len(matchedLines) >= maxMatches:
+                            break
+        except Exception:
+            continue
+        if len(matchedLines) >= maxMatches:
+            break
+
+    if not matchedLines:
+        return f"No matches found for '{query}' in '{path}'."
+
+    output = "\n".join(matchedLines)
+    if len(matchedLines) >= maxMatches:
+        output += f"\n(Results capped at {maxMatches} matches)"
+    return output
 
 @tool
 def executeCommand(command: str) -> str:
     """Execute a shell command inside the workspace directory."""
     print(f"\n[Command Approval] {command}")
-    confirm = input("Execute command? (y/n): ").strip().lower()
-    if confirm != 'y':
+    if autoApprove:
+        confirm = "y"
+    else:
+        confirm = input("Execute command? (y/n): ").strip()
+    if confirm.lower() != "y":
+        guidance = ""
+        if confirm.lower() == "n":
+            guidance = input("What should Tester execute instead? (press Enter to skip): ").strip()
+        elif confirm:
+            guidance = confirm
+        if guidance:
+            return f"Command execution rejected by user. User instruction on what to execute: '{guidance}'. Follow this instruction strictly."
         return "Command execution rejected by user."
 
     try:
@@ -630,10 +641,11 @@ def executeCommand(command: str) -> str:
         tOut.start()
         tErr.start()
 
-        isGui = isGuiApplication(command, WORK_DIR)
-        livenessTimeout = 3.0
-        if not isGui:
-            livenessTimeout = 15.0
+        cmdLower = command.lower()
+        serverKeywords = ("dev", "serve", "start", "watch", "nodemon", "uvicorn", "flask")
+        tokens = cmdLower.replace(";", " ").replace("&&", " ").split()
+        isServerCmd = any(k in tokens for k in serverKeywords)
+        livenessTimeout = 10.0 if isServerCmd else 180.0
 
         startTime = time.time()
         while True:
@@ -648,7 +660,6 @@ def executeCommand(command: str) -> str:
             time.sleep(0.1)
 
         processRunning = proc.poll() is None
-        totalDuration = time.time() - startTime
 
         if processRunning:
             if os.name == 'nt' and proc.pid:
@@ -675,24 +686,18 @@ def executeCommand(command: str) -> str:
                 hasError = True
                 break
 
-        if isGui:
-            if processRunning and not hasError:
-                output = "Exit Code: 0 (Process started successfully)\n"
-                if stdoutText:
-                    output += f"STDOUT:\n{stdoutText}\n"
-                return output
-            if not processRunning and totalDuration < 2.0:
-                output = "Exit Code: 1 (GUI application exited prematurely)\n"
-                if stdoutText:
-                    output += f"STDOUT:\n{stdoutText}\n"
-                if stderrText:
-                    output += f"STDERR:\n{stderrText}\n"
-                return output
-
-        if isReady.is_set() or (processRunning and not hasError):
+        if isReady.is_set() or (isServerCmd and processRunning and not hasError):
             output = "Exit Code: 0 (Process started successfully)\n"
             if stdoutText:
                 output += f"STDOUT:\n{stdoutText}\n"
+            return output
+
+        if processRunning and not isServerCmd:
+            output = f"Exit Code: 1 (Command timed out after {int(livenessTimeout)}s)\n"
+            if stdoutText:
+                output += f"STDOUT:\n{stdoutText}\n"
+            if stderrText:
+                output += f"STDERR:\n{stderrText}\n"
             return output
 
         output = f"Exit Code: {proc.returncode}\n"
@@ -704,6 +709,38 @@ def executeCommand(command: str) -> str:
 
     except Exception as e:
         return f"Error executing command: {str(e)}"
+
+@tool
+def executor(command: str) -> str:
+    """Execute a scaffolding or code generation command to initialize project code via CLI."""
+    cleanCmd = command.strip()
+    lowerCmd = cleanCmd.lower()
+    scaffoldTokens = [
+        "create",
+        "init",
+        "new",
+        "scaffold",
+        "generate",
+        "template",
+        "setup",
+        "vite",
+        "install",
+        "add",
+        "bootstrap"
+    ]
+    tokens = lowerCmd.replace(";", " ").replace("&&", " ").replace("||", " ").split()
+    isScaffold = False
+    for tok in tokens:
+        for st in scaffoldTokens:
+            if st in tok:
+                isScaffold = True
+                break
+        if isScaffold:
+            break
+    if not isScaffold:
+        return "Executor rejected: Command is not a code generation or scaffolding command. Use standard file tools like createFile or editFile for regular coding."
+    print(f"\n[Executor] Running generator command: {cleanCmd}")
+    return executeCommand.invoke({"command": cleanCmd})
 
 @tool
 def searchWeb(query: str) -> str:
@@ -726,14 +763,17 @@ tools = [
     createFile,
     createFiles,
     editFile,
-    addImport,
     upsertFunction,
     upsertClass,
     appendToFile,
     replaceBlock,
     deleteResource,
     readFile,
+    grepFiles,
     searchWeb,
+    downloadAsset,
+    moveFile,
     finishTask,
-    executeCommand
+    executeCommand,
+    executor
 ]

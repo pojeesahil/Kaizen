@@ -15,11 +15,14 @@ RULES:
 - Closed Topology & Navigation Invariants: When planning tasks for multi-map, multi-scene, or multi-view systems, each location or view must explicitly include both inbound and outbound transitions to other nodes in the navigation graph so that no map or view becomes a disconnected dead end.
 - Bounded Scope: Each task must be small enough to be fully implemented in 1-2 files (or 2-4 asset files) without placeholders, stubs, or unwritten methods.
 - Do NOT generate micro-tasks for tiny elements (like single buttons or styling tweaks). Keep tasks scoped to cohesive modules or complete files.
-- Focus strictly on concrete source files. Do NOT generate tasks for environment setup, runtime installs (Node, Python), or package manager commands. For web projects, include root configuration files (package.json, tsconfig.json, index.html) when necessary.
+- Focus strictly on concrete source files. Do NOT generate tasks for environment setup, runtime installs (Node, Python), or package manager commands. For web projects, include root configuration files (package.json, tsconfig.json, index.html) when necessary. For Vite projects, index.html is the entry point and must always reside at the subproject root (e.g. client/index.html), never inside public/.
+- Tech Stack Invariant: All tasks, source files, and libraries MUST strictly adhere to {tech_stack}. Never introduce languages, frameworks, or package managers (e.g. Node.js/package.json in Python projects) that conflict with {tech_stack}.
 
 Deliverable: {name}
 Kind: {kind}
 Goal: {goal}
+Tech Stack: {tech_stack}
+Planned File Structure: {file_structure}
 Requirements: {requirements}
 
 For each task, provide:
@@ -90,13 +93,16 @@ def validateTasks(data) -> List[dict]:
         })
     return validTasks
 
-def callLLMforTasks(deliverable: Deliverable) -> List[dict]:
+def callLLMforTasks(deliverable: Deliverable, techStack: str = "", fileStructure: List[str] = None) -> List[dict]:
     llm = getPlannerLLM()
+    fileStructStr = ", ".join(fileStructure) if fileStructure else "none specified"
     promptText = TASK_DECOMPOSITION_PROMPT.format(
         name=deliverable.name,
         kind=deliverable.kind,
         goal=deliverable.goal,
         requirements=", ".join(deliverable.requirements) if deliverable.requirements else "none specified",
+        tech_stack=techStack or "Not specified",
+        file_structure=fileStructStr,
     )
 
     for attempt in range(2):
@@ -115,8 +121,8 @@ def callLLMforTasks(deliverable: Deliverable) -> List[dict]:
 
 class DeliverablePlanner:
 
-    def plan(self, deliverable: Deliverable) -> DeliverablePlan:
-        llmTasks = callLLMforTasks(deliverable)
+    def plan(self, deliverable: Deliverable, techStack: str = "", fileStructure: List[str] = None) -> DeliverablePlan:
+        llmTasks = callLLMforTasks(deliverable, techStack=techStack, fileStructure=fileStructure)
         priority = deliverable.priority
         tasks = self.buildTaskChain(deliverable, llmTasks, priority)
         return DeliverablePlan(deliverable=deliverable, tasks=tasks)

@@ -1,4 +1,5 @@
 import os
+import shutil
 import re
 import time
 import json
@@ -15,32 +16,45 @@ from core.tools import (
     createFile,
     createFiles,
     editFile,
-    addImport,
     upsertFunction,
     upsertClass,
     appendToFile,
     replaceBlock,
     deleteResource,
     readFile,
+    grepFiles,
     searchWeb,
+    downloadAsset,
+    moveFile,
     finishTask,
     executeCommand,
+    executor,
     WORK_DIR
 )
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
-from rag.rag import indexWorkspace, getContext
+from cag.cag import (
+    loadCag,
+    getCagContext,
+    updateCagFile,
+    getCoderContext,
+    indexWorkspace,
+    getContext,
+    updateWorkspaceFile
+)
 from agents.prompt import PromptAgent
 from agents.planneragent import PlannerAgent
 from agents.patchclassifier import classifyIntent, buildPatchInstruction
 from agents.dag import DAG
 from agents.scheduler import Scheduler
 from agents.hitl import HITLReview, reviewDeliverables
+from agents.githubagent import GitHubAgent
 from core.memory import MemoryManager
 from core.logger import startLogging
 
 os.environ["OLLAMA_NUM_PARALLEL"] = "4"
 
 memoryManager = MemoryManager()
+gitHubAgent = GitHubAgent(WORK_DIR)
 verifiedManifestHashes = {}
 
 def shouldRetrieveMemory(instruction: str) -> bool:
@@ -104,17 +118,56 @@ def extractCommand(toolRecord: str) -> str:
 
 def isSetupCommand(cmd: str) -> bool:
     lowerCmd = cmd.lower().strip()
-    cleaned = lowerCmd.replace("-", " ").replace("=", " ")
+    if any(lowerCmd.startswith(p) for p in ("echo ", "cat ", "type ", "head ", "tail ", "dir", "ls")):
+        return True
+    cleaned = lowerCmd.replace("-", " ").replace("=", " ").replace(";", " ")
     tokens = cleaned.split()
-    setupWords = ["install", "add", "get", "update", "download", "version", "which", "where"]
+    execWords = {
+        "test",
+        "tests",
+        "build",
+        "start",
+        "run",
+        "serve",
+        "server",
+        "exec",
+        "bench",
+        "benchmark",
+        "check",
+        "compile",
+        "dev"
+    }
+    for w in execWords:
+        if w in tokens:
+            return False
+    setupWords = {
+        "install",
+        "add",
+        "get",
+        "update",
+        "upgrade",
+        "download",
+        "sync",
+        "ci",
+        "fetch",
+        "version",
+        "which",
+        "where"
+    }
     for w in setupWords:
         if w in tokens:
             return True
-    prefixes = ["pip ", "npm ", "yarn ", "pnpm ", "cargo ", "gem ", "bundle "]
-    for p in prefixes:
-        if p in lowerCmd:
-            return True
+    pkgManagers = {"npm", "yarn", "pnpm", "pip", "pip3", "cargo", "gem", "bundle"}
+    for idx, token in enumerate(tokens):
+        if token in pkgManagers:
+            if idx + 1 < len(tokens):
+                nextToken = tokens[idx + 1]
+                if nextToken in {"i", "setup"}:
+                    return True
+            else:
+                return True
     return False
+
 
 def executeToolCalls(response, toolsList):
     toolMap = {t.name: t for t in toolsList}
@@ -135,10 +188,10 @@ def executeToolCalls(response, toolsList):
                 targs = {}
             if isinstance(tname, str) and tname in toolMap:
                 try:
-                    if tname == "executeCommand" and "command" in targs:
+                    if tname in ("executeCommand", "executor") and "command" in targs:
                         targs["command"] = sanitizeCommand(targs["command"])
                     res = toolMap[tname].invoke(targs)
-                    if tname == "executeCommand":
+                    if tname in ("executeCommand", "executor"):
                         executed.append(f"Tool {tname} executed: command='{targs.get('command', '')}' | {res}")
                     else:
                         executed.append(f"Tool {tname} executed: {res}")
@@ -171,6 +224,9 @@ def executeToolCalls(response, toolsList):
                 if isinstance(tname, dict):
                     tname = tname.get("name") or tname.get("function", {}).get("name")
                 targs = data.get("arguments") or data.get("args") or {}
+                if not tname and "summary" in data:
+                    tname = "finishTask"
+                    targs = {"summary": data.get("summary")}
                 if isinstance(targs, str):
                     try:
                         targs = json.loads(targs)
@@ -180,10 +236,10 @@ def executeToolCalls(response, toolsList):
                     targs = {}
                 if isinstance(tname, str) and tname in toolMap:
                     try:
-                        if tname == "executeCommand" and "command" in targs:
+                        if tname in ("executeCommand", "executor") and "command" in targs:
                             targs["command"] = sanitizeCommand(targs["command"])
                         res = toolMap[tname].invoke(targs)
-                        if tname == "executeCommand":
+                        if tname in ("executeCommand", "executor"):
                             executed.append(f"Tool {tname} executed: command='{targs.get('command', '')}' | {res}")
                         else:
                             executed.append(f"Tool {tname} executed: {res}")
@@ -199,15 +255,18 @@ coderTools = [
     createFile,
     createFiles,
     editFile,
-    addImport,
     upsertFunction,
     upsertClass,
     appendToFile,
     replaceBlock,
     deleteResource,
     readFile,
+    grepFiles,
     searchWeb,
-    finishTask
+    downloadAsset,
+    moveFile,
+    finishTask,
+    executor
 ]
 testerTools = [
     executeCommand
@@ -304,22 +363,21 @@ def coderNode(state: AgentState) -> dict:
     if isPatchMode:
         patchModeDirective = (
             "\nPATCH MODE ACTIVE:\n"
-            "- The user is asking you to fix or adjust something specific — NOT rebuild the project.\n"
-            "- Your first action MUST be to use readFile on the relevant file(s) before touching anything.\n"
-            "- Only edit the lines/functions that are broken. Leave all other working code untouched.\n"
-            "- Never use createFile for a file that already exists in the workspace.\n"
-            "- Never regenerate an entire module because one function inside it is broken.\n"
+            "- You can create new files using createFile or createFiles whenever new assets, files, or components are needed.\n"
+            "- For existing files, inspect them with readFile first and make targeted edits using editFile or replaceBlock.\n"
+            "- Leave all other working code untouched.\n"
         )
 
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
 Your goal is to produce complete, connected, buildable, and runnable code.
 {patchModeDirective}
 You operate in an Action-driven loop:
-1. Every turn, directly invoke the necessary tool (createFile, createFiles, editFile, upsertFunction, upsertClass, addImport, appendToFile, replaceBlock, readFile, searchWeb, finishTask) to inspect or modify code.
+1. Every turn, directly invoke the necessary tool (createFile, createFiles, editFile, upsertFunction, upsertClass, appendToFile, replaceBlock, readFile, grepFiles, searchWeb, downloadAsset, moveFile, finishTask, executor) to inspect or modify code.
 2. When creating multiple related files (such as SVGs, models, or configurations), use 'createFiles' to write all files together in a single batch call.
-3. Never output conversational plans or text like 'I will also need to add...'. Execute the action via tool calls immediately.
-4. After each tool execution, you will observe the tool output and the updated live AST Symbol Registry.
-5. Explicit Task Completion: As soon as all files, imports, and requirements for the current task are fully in place, call 'finishTask(summary=...)' to conclude your work.
+3. Use 'grepFiles' to quickly locate symbols, functions, or text across files without reading entire files.
+4. Never output conversational plans or text like 'I will also need to add...'. Execute the action via tool calls immediately.
+5. After each tool execution, you will observe the tool output and the updated live AST Symbol Registry.
+6. Explicit Task Completion: As soon as all files, imports, and requirements for the current task are fully in place, call 'finishTask(summary=...)' to conclude your work.
 
 RULES:
 1. Always write production-grade, modular, maintainable code with clear separation of concerns.
@@ -329,7 +387,12 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
 4. Call tools directly. Do not narrate or list planned edits in conversational text.
 5. File Operations:
    - Use 'createFile' for a single new file, or 'createFiles' to write multiple files in one turn.
-   - Use 'editFile', 'upsertFunction', 'upsertClass', 'addImport', 'appendToFile', or 'replaceBlock' to update existing files without breaking unrelated code.
+   - Use 'downloadAsset' to download assets or binary files from URLs.
+   - Use 'moveFile' to move or rename files or directories from one path to another.
+   - Use 'grepFiles' to find exact occurrences of functions, routes, and variables across the project.
+   - Use 'editFile', 'upsertFunction', 'upsertClass', 'appendToFile', or 'replaceBlock' to update existing files without breaking unrelated code.
+   - To add or modify imports in any language, use 'replaceBlock' to insert or update import statements near existing imports, or use 'editFile'.
+   - Use 'executor' ONLY when code or project scaffolding can be generated via CLI (such as Vite setup or project templates). Do NOT use 'executor' for normal coding, file edits, reading files, or running tests.
 6. ALWAYS UPDATE DEPENDENT FILES:
    - Whenever you add, rename, or modify a function, class, method, route, or export in one file, you MUST immediately update all dependent files (caller functions, import/require statements, routes, and server entrypoints) in the same response so the entire project remains connected and working.
 7. Completeness & Quality:
@@ -347,6 +410,7 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
    - Keep all source files conforming to the planned layout.{fileLayoutRule}
    - All files created MUST match the project's target tech stack. Never create C/C++ files in a Python project or mix incompatible languages.
 12. {langGuideline}
+13. For Vite or modern web frontend projects, 'index.html' is the root entry point and MUST be placed at the root of the frontend subproject (e.g. client/index.html), NEVER inside public/ or client/public/.
 
 Workspace Symbol Registry & AST:
 {initialAst}
@@ -372,13 +436,17 @@ QA Feedback to Address:
     lastResponse = None
     lastMessage = ""
 
-    for turn in range(6):
+    for turn in range(50):
         coderResponse = streamInvoke(threadModel, coderMessages)
         lastResponse = coderResponse
         lastMessage = extractText(coderResponse.content)
         toolResults = executeToolCalls(coderResponse, coderTools)
 
         if not toolResults:
+            if turn < 2 and not allToolResults:
+                nudge = "You have not executed any tools yet. You must use tool calls (createFile, createFiles, editFile, replaceBlock, readFile) to inspect or modify code. Call the appropriate tool now."
+                coderMessages.extend([coderResponse, HumanMessage(content=nudge)])
+                continue
             break
 
         allToolResults.extend(toolResults)
@@ -389,7 +457,13 @@ QA Feedback to Address:
         if taskFinished:
             break
 
+        if len(allToolResults) >= 50:
+            print("\n[Coder] Maximum tool call limit (50) reached. Automatically completing task.")
+            allToolResults.append("Tool finishTask executed: Task auto-completed after reaching maximum tool call limit (50).")
+            break
+
         autoFixImports(WORK_DIR)
+        loadCag(str(WORK_DIR))
         liveAst = formatManifestContext(WORK_DIR)
         obsText = "\n".join(toolResults)
 
@@ -409,6 +483,7 @@ QA Feedback to Address:
         ])
 
     autoFixImports(WORK_DIR)
+    loadCag(str(WORK_DIR))
 
     return {
         "iteration": iteration,
@@ -465,14 +540,14 @@ def formatChangedFilesContent(workDir: Path, changedFiles: list) -> str:
     for rel in changedFiles:
         fpath = workDir / rel
         if not fpath.exists():
-            parts.append(f"--- {rel} (DELETED) ---")
+            parts.append(f"[File: {rel}] (DELETED)")
             continue
         try:
             with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read(50000)
-            parts.append(f"--- {rel} ---\n{content}")
+            parts.append(f"[File: {rel}]\n{content}")
         except Exception:
-            parts.append(f"--- {rel} (UNABLE TO READ) ---")
+            parts.append(f"[File: {rel}] (UNABLE TO READ)")
     return "\n\n".join(parts)
 
 def updateWorkspaceSnapshot(workDir: Path) -> None:
@@ -551,11 +626,36 @@ def isAssetOnlyTask(instruction: str, changedFiles: list) -> bool:
             return False
     return True
 
+def alignFrontendConventions(workDir: Path) -> None:
+    if not workDir.exists():
+        return
+    for item in workDir.iterdir():
+        if item.is_dir():
+            publicIndex = item / "public" / "index.html"
+            rootIndex = item / "index.html"
+            isVite = (item / "vite.config.js").exists() or (item / "vite.config.ts").exists() or (item / "vite.config.mjs").exists()
+            pkgJson = item / "package.json"
+            if not isVite and pkgJson.exists():
+                try:
+                    with open(pkgJson, "r", encoding="utf-8") as f:
+                        pkgContent = f.read()
+                        if "vite" in pkgContent:
+                            isVite = True
+                except Exception:
+                    pass
+            if isVite and publicIndex.exists() and not rootIndex.exists():
+                try:
+                    shutil.copy2(str(publicIndex), str(rootIndex))
+                    print(f"\n[Conventions] Synchronized Vite entry point to {rootIndex.as_posix()}")
+                except Exception:
+                    pass
+
 workspaceSnapshot = getWorkspaceSnapshot(WORK_DIR)
 
 def criticNode(state: AgentState) -> dict:
     print(f"\nCritic iteration {state['iteration']}")
 
+    alignFrontendConventions(WORK_DIR)
     autoFixImports(WORK_DIR)
     isValid, connErrors = validateConnectedness(WORK_DIR)
     if not isValid:
@@ -575,6 +675,10 @@ def criticNode(state: AgentState) -> dict:
             if rel.lower() in instLower or Path(rel).name.lower() in instLower:
                 changedFiles.append(rel)
     changedFiles.sort()
+    if not changedFiles:
+        entryCandidates = ("main", "app", "index", "server")
+        entryFiles = [f for f in allSnapshot if any(c in Path(f).stem.lower() for c in entryCandidates)]
+        changedFiles = entryFiles if entryFiles else allSnapshot[:5]
 
     if isAssetOnlyTask(state["instruction"], changedFiles):
         print("\n[Critic Tier 1: Micro] Asset/Documentation task verified via workspace file state.")
@@ -592,6 +696,8 @@ def criticNode(state: AgentState) -> dict:
         "You are an expert Micro Code Critic reviewing task-level code modifications.\n"
         "Review the modified files and task instructions strictly for correctness, missing method calls, and stub implementations.\n"
         "Existing workspace files from prior completed milestones are established and do not need re-modification.\n"
+        "If a task objective specifies a file or library that contradicts the primary Target Tech Stack or existing codebase, implementing the equivalent functionality using the project's designated language/stack is acceptable.\n"
+        "If no files were modified because existing entrypoint files already fully satisfy the integration or wiring, respond strictly with PASS.\n"
         "Respond starting strictly with PASS if the changes fulfill the task without regressions, or FAIL followed by concise error details."
     )
     microInstruction = (
@@ -615,7 +721,7 @@ def criticNode(state: AgentState) -> dict:
             "isAssetOnly": False
         }
 
-    isFinalTask = "integrate" in state["instruction"].lower() or "final" in state["instruction"].lower() or "playtest" in state["instruction"].lower()
+    isFinalTask = any(w in state["instruction"].lower() for w in ("integrate", "final", "playtest", "verification"))
     if not isFinalTask:
         print("\n[Critic Tier 1: Micro] Passed. Skipping Tier 2 System Critic for incremental task.")
         return {
@@ -653,7 +759,7 @@ def criticNode(state: AgentState) -> dict:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read(50000)
                     if content.strip():
-                        workFileParts.append(f"--- {rel} ---\n{content}")
+                        workFileParts.append(f"[File: {rel}]\n{content}")
                 except Exception:
                     continue
 
@@ -662,6 +768,9 @@ def criticNode(state: AgentState) -> dict:
     systemPretext = (
         "You are an expert System Architecture Critic evaluating end-to-end multi-file coherence.\n"
         "Verify complete application wiring, navigation reachability, and absence of dead ends.\n"
+        "- Network: verify endpoints, ports, and CORS.\n"
+        "- Persistence: verify DB schema, initialization, and seeding.\n"
+        "- Mounting: verify routes and components connect to root.\n"
         "Respond starting strictly with PASS if the system architecture is coherent, or FAIL followed by diagnostics."
     )
     systemInstruction = (
@@ -682,11 +791,39 @@ def criticNode(state: AgentState) -> dict:
         "isAssetOnly": False
     }
 
+def shouldRetryTester(errorOutput: str) -> bool:
+    if "rejected by user" in errorOutput.lower():
+        return True
+    cappedError = "\n".join(errorOutput.strip().splitlines()[:6])
+    triagePrompt = (
+        f"A command failed with output:\n{cappedError}\n\n"
+        "Was this caused by a shell or command execution error (such as an invalid command on this operating system, missing executable, wrong flag, or wrong path) or by an application source code defect?\n"
+        "Reply strictly with RETRY_TESTER if Tester should try a different shell command, or CODER if application source code needs to be repaired."
+    )
+    try:
+        triageResp = get_llm().invoke([HumanMessage(content=triagePrompt)])
+        return "RETRY_TESTER" in extractText(triageResp.content).upper()
+    except Exception:
+        return False
+
 def testerNode(state: AgentState) -> dict:
     print(f"\nTester iteration {state['iteration']}")
 
+    alignFrontendConventions(WORK_DIR)
+
     allFiles = []
-    entryPoints = []
+    subprojectDirs = set()
+    manifestNames = {
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "cargo.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "makefile",
+        "cmakelists.txt"
+    }
     skipDirs = {
         "node_modules",
         "__pycache__",
@@ -709,22 +846,40 @@ def testerNode(state: AgentState) -> dict:
                 rel = Path(root).relative_to(WORK_DIR) / fname
                 relStr = rel.as_posix()
                 allFiles.append(relStr)
-                if relStr.endswith(".py"):
-                    fpath = Path(root) / fname
-                    try:
-                        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                        if "if __name__" in content or "def main(" in content:
-                            entryPoints.append(relStr)
-                    except Exception:
-                        pass
-                elif relStr == "index.html" or relStr.endswith("/index.html"):
-                    entryPoints.append(relStr)
-                elif relStr in ("server.js", "app.js", "index.js", "main.js", "src/server.js", "src/app.js", "src/index.js"):
-                    entryPoints.append(relStr)
+                if fname.lower() in manifestNames:
+                    subRel = Path(root).relative_to(WORK_DIR).as_posix()
+                    subprojectDirs.add(subRel if subRel != "." else ".")
 
-    if not entryPoints:
-        print("\n[Tester] No runnable entrypoints in workspace. Skipping runtime execution.")
+    subprojects = sorted(list(subprojectDirs)) if subprojectDirs else ["."]
+
+    if not allFiles:
+        print("\n[Tester] No files in workspace. Skipping runtime execution.")
+        return {
+            "messages": [],
+            "feedback": state["feedback"],
+            "success": True
+        }
+
+    executableExts = {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".rs",
+        ".go",
+        ".java",
+        ".c",
+        ".cpp",
+        ".cs",
+        ".rb",
+        ".php"
+    }
+    hasExecutableCode = any(Path(f).suffix.lower() in executableExts for f in allFiles)
+    hasManifest = bool(subprojectDirs)
+
+    if not hasExecutableCode and not hasManifest:
+        print("\n[Tester] No executables or project manifests found. Skipping runtime verification.")
         return {
             "messages": [],
             "feedback": state["feedback"],
@@ -732,9 +887,8 @@ def testerNode(state: AgentState) -> dict:
         }
 
     filesStr = ", ".join(allFiles) if allFiles else "None"
-    entryStr = ", ".join(entryPoints)
+    subprojectsStr = ", ".join(subprojects)
     manifestStr = formatManifestContext(WORK_DIR)
-    hasPackages = any("/" in f for f in allFiles if f.endswith(".py"))
     srcDir = WORK_DIR / "src"
     pathSeparator = ";" if os.name == "nt" else ":"
     if srcDir.exists():
@@ -742,21 +896,7 @@ def testerNode(state: AgentState) -> dict:
     else:
         pyPathPrefix = f"set PYTHONPATH={WORK_DIR.resolve()} && " if os.name == "nt" else f"PYTHONPATH={WORK_DIR.resolve()} "
 
-    runHints = []
-    for ep in entryPoints:
-        if ep.endswith(".py") and "/" in ep:
-            modName = ep.replace("/", ".").replace("\\", ".").removesuffix(".py")
-            runHints.append(f"python -m {modName}")
-        elif ep.endswith(".py"):
-            runHints.append(f"python {ep}")
-        elif ep.endswith(".html"):
-            runHints.append(f"open {ep}")
-        elif ep.endswith(".js"):
-            runHints.append(f"node {ep}")
-    hintsStr = ", ".join(runHints) if runHints else "python <entrypoint>"
-
     manifestExts = {".json", ".toml", ".yaml", ".yml", ".xml", ".gradle", ".mod", ".lock", ".cfg", ".ini"}
-    manifestNames = {"requirements.txt", "makefile", "gemfile", "dockerfile", "procfile", "cmakelists.txt"}
     currentManifestHashes = {}
     if WORK_DIR.exists():
         for item in WORK_DIR.iterdir():
@@ -773,39 +913,36 @@ def testerNode(state: AgentState) -> dict:
     if envAlreadyVerified:
         protocolText = (
             "EXECUTION PROTOCOL:\n"
-            "Environment runtime and dependencies have already been verified in a previous milestone, and workspace manifests are unchanged.\n"
-            "Skip Step 1 (do NOT run environment checks, version commands, or package manager installations).\n"
-            "Proceed directly to Step 2: execute application verification or test commands.\n"
+            "Environment runtime and dependencies were verified in a previous milestone.\n"
+            f"Detected Subprojects to verify: [{subprojectsStr}].\n"
+            "Execute application build, test, or verification commands directly for all subprojects.\n"
         )
-        humanContent = f"Workspace files: [{filesStr}]. Detected Entrypoints: [{entryStr}]. Environment and dependencies are already verified. Immediately execute the application entrypoint or test command: [{hintsStr}]."
+        humanContent = f"Workspace files: [{filesStr}]. Detected Subprojects: [{subprojectsStr}]. Environment verified. Execute build, test, or verification commands directly across all subprojects."
     else:
         protocolText = (
             "EXECUTION PROTOCOL:\n"
-            "Step 1 - Environment & Dependency Check:\n"
-            "- First, inspect workspace manifests or build configuration files.\n"
-            "- Check if required runtimes, compilers, or dependencies are available and install any missing packages using the project's package manager.\n"
-            "Step 2 - Entrypoint Execution:\n"
-            "- Once dependencies are confirmed, execute the entrypoint or test suite to verify the application.\n"
+            f"Detected Subprojects to verify: [{subprojectsStr}].\n"
+            "Execute build, test, or runtime commands directly across all subprojects (e.g. install dependencies if needed, build frontend, start/test backend).\n"
+            "Do NOT run shell commands to view or inspect file contents.\n"
         )
-        humanContent = f"Workspace files: [{filesStr}]. Detected Entrypoint: [{entryStr}]. First check runtime environment and install any missing dependencies, then execute the application entrypoint to verify execution."
+        humanContent = f"Workspace files: [{filesStr}]. Detected Subprojects: [{subprojectsStr}]. Execute build, test, or verification commands directly across all subprojects. Do not read or inspect files."
 
+    platformName = "Windows" if os.name == "nt" else "Linux/macOS"
     runPretext = (
-        "You are responsible for verifying code execution in the workspace.\n"
+        "You are responsible for verifying code execution across all workspace subprojects.\n"
+        f"Operating System: {platformName}\n"
         f"{protocolText}"
         "CRITICAL RULES:\n"
-        "- Output executeCommand tool calls ONLY to check runtime, install dependencies, and run the application.\n"
-        "- Do NOT attempt to modify, patch, or rewrite source code files using shell commands (e.g. sed, cat, echo, python -c with file writing, or powershell scripts).\n"
-        "- Terminal CWD is ALREADY the work/ directory. Do NOT prefix filenames with 'work/'.\n"
-        f"- Files in workspace: [{filesStr}]\n"
-        f"- Detected Entrypoints: [{entryStr}]\n"
-        f"- Suggested run commands: [{hintsStr}]\n\n"
-        f"{manifestStr}\n\n"
-        f"- For Python packages (files inside subdirectories), ALWAYS use: {pyPathPrefix}python -m <package>.<module>\n"
-        "- NEVER run a file inside a package directly like 'python subfolder/file.py' as it breaks package imports.\n"
-        "- If an application requires interactive console input (input()), test non-interactively via import checks or piped inputs.\n"
-        f"- If the app uses tkinter/pygame/GUI, run a non-interactive syntax+import check instead: {pyPathPrefix}python -c \"import <module>\"\n"
-        "- If execution completes with Exit Code: 0 and no errors, respond strictly with 'PASS'.\n"
-        "- If execution crashes, throws errors, or fails, DO NOT try to fix the code. Respond strictly with 'FAIL' followed by complete traceback and error diagnostics so the Coder Agent can repair the files."
+        "- Output executeCommand tool calls ONLY to install dependencies, build, and run the application.\n"
+        "- Do NOT execute shell commands to view or inspect files (e.g. cat, type, head, tail, dir, ls). Inspecting file contents is not your job; execute build, test, and run commands directly.\n"
+        f"- You must verify ALL detected subprojects [{subprojectsStr}]. Do not conclude after testing only one.\n"
+        "- Terminal CWD is ALREADY the workspace root. Use 'cd <subproject> && ...' to target specific subprojects.\n"
+        "- Do NOT attempt to modify or patch source code files using shell commands.\n"
+        f"- For Python packages (files inside subdirectories), use: {pyPathPrefix}python -m <package>.<module>\n"
+        "- If an application requires interactive input, test non-interactively.\n"
+        "- If execution completes with Exit Code: 0 and no errors across all subprojects, respond strictly with 'PASS'.\n"
+        "- If a command is rejected or denied by the user, immediately follow any user-provided instruction or try an alternative command.\n"
+        "- If any command crashes, throws build errors, or fails, respond strictly with 'FAIL' followed by complete traceback and error diagnostics so the Coder Agent can repair the files."
     )
 
     runMessages = [
@@ -817,17 +954,34 @@ def testerNode(state: AgentState) -> dict:
     testerMessage = ""
     allRunTools = []
 
-    for attempt in range(1, 6):
+    for attempt in range(1, 11):
         if attempt > 1:
-            print(f"\nTester retry {attempt}/5")
+            print(f"\nTester retry {attempt}/10")
         threadTesterModel = get_llm().bind_tools(testerTools)
         testerResponse = streamInvoke(threadTesterModel, runMessages)
         testerMessage = extractText(testerResponse.content)
         runTools = executeToolCalls(testerResponse, testerTools)
-        if runTools:
-            allRunTools.extend(runTools)
-            for tr in runTools:
-                print(tr, "\n")
+        deniedTools = [tr for tr in runTools if "command execution rejected by user" in tr.lower()]
+        activeRunTools = [tr for tr in runTools if "command execution rejected by user" not in tr.lower()]
+        if activeRunTools:
+            allRunTools.extend(activeRunTools)
+        for tr in runTools:
+            print(tr, "\n")
+
+        if deniedTools:
+            if attempt < 10:
+                deniedDetails = "\n".join(deniedTools)
+                promptNote = (
+                    f"The user denied execution of the following command(s):\n{deniedDetails}\n\n"
+                    "Do not run the rejected command again. Follow the user's instruction or run the alternative command to accomplish verification."
+                )
+                runMessages.extend([
+                    testerResponse,
+                    HumanMessage(content=promptNote)
+                ])
+                continue
+            testerMessage = "FAIL: Command execution rejected by user:\n" + "\n".join(deniedTools)
+            break
 
         appRunTools = []
         setupRunTools = []
@@ -840,66 +994,66 @@ def testerNode(state: AgentState) -> dict:
 
         hasRunApp = len(appRunTools) > 0
         appOutput = "\n".join(appRunTools)
-        hasZeroExit = "Exit Code: 0" in appOutput
-        hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput
+        allAppExitsZero = bool(appRunTools) and all("Exit Code: 0" in tr for tr in appRunTools)
+        hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput or "error during build" in appOutput.lower()
 
-        if hasRunApp and hasZeroExit and not hasError:
-            testerMessage = "PASS"
-            print("\n[Tester] Application execution verified successfully (Exit Code: 0).")
-            break
+        testedSubprojects = set()
+        for tr in appRunTools:
+            extractedCmd = extractCommand(tr)
+            for sub in subprojects:
+                if sub == "." or f"cd {sub}" in extractedCmd or f"/{sub}/" in extractedCmd or extractedCmd.startswith(f"{sub}/") or f" {sub}" in extractedCmd:
+                    testedSubprojects.add(sub)
 
-        if hasRunApp and (hasError or not hasZeroExit):
-            testerMessage = f"FAIL: Application execution failed with error:\n{appOutput}"
+        allSubprojectsTested = bool(subprojects) and all(s in testedSubprojects for s in subprojects)
+
+        failedRunTools = []
+        for tr in allRunTools:
+            hasZero = "Exit Code: 0" in tr
+            hasErrToken = "Traceback" in tr or "Error:" in tr or "Exception:" in tr or "error during build" in tr.lower() or "SyntaxError" in tr or "Cannot find module" in tr or "MODULE_NOT_FOUND" in tr
+            if not hasZero or hasErrToken:
+                if hasZero and "STDERR:" in tr and "npm warn" in tr and not hasErrToken:
+                    continue
+                failedRunTools.append(tr)
+
+        if (hasRunApp and (hasError or not allAppExitsZero)) or failedRunTools:
+            failureDetails = "\n\n".join(failedRunTools) if failedRunTools else appOutput
+            if attempt < 10 and shouldRetryTester(failureDetails):
+                for ftr in failedRunTools:
+                    if ftr in allRunTools:
+                        allRunTools.remove(ftr)
+                promptNote = f"The previous command failed:\n{failureDetails}\n\nThis appears to be a command execution or shell compatibility issue. Try an alternate, platform-compatible command or script."
+                runMessages.extend([
+                    testerResponse,
+                    HumanMessage(content=promptNote)
+                ])
+                continue
+            testerMessage = f"FAIL: Application execution failed with error:\n{failureDetails}"
             print("\n[Tester] Application execution failed. Delegating diagnostic to Coder Agent.")
             break
 
-        if testerMessage.strip().upper().startswith("PASS") and hasRunApp:
+        if hasRunApp and allAppExitsZero and not hasError and not failedRunTools and allSubprojectsTested:
+            testerMessage = "PASS"
+            print("\n[Tester] All subprojects verified successfully (Exit Code: 0).")
             break
 
+        if testerMessage.strip().upper().startswith("PASS") and hasRunApp and not failedRunTools and allSubprojectsTested:
+            break
+
+        untestedSubprojects = [s for s in subprojects if s not in testedSubprojects]
         recentCmds = [extractCommand(tr) for tr in runTools]
         onlySetupRun = bool(runTools) and all(isSetupCommand(c) for c in recentCmds if c)
 
-        if (not runTools and not hasRunApp) or onlySetupRun:
-            if entryPoints:
-                targetEntry = entryPoints[0]
-                ext = Path(targetEntry).suffix.lower()
-                if ext == ".html":
-                    autoCmd = f"node -e \"console.log('Static web frontend entrypoint verified: {targetEntry}')\""
-                elif ext in (".js", ".ts"):
-                    autoCmd = f"node {targetEntry}"
-                elif ext == ".py" and "/" in targetEntry:
-                    modName = targetEntry.replace("/", ".").replace("\\", ".").removesuffix(".py")
-                    autoCmd = f"{pyPathPrefix}python -m {modName}"
-                elif ext == ".py":
-                    autoCmd = f"{pyPathPrefix}python {targetEntry}"
-                elif ext == ".go":
-                    autoCmd = f"go run {targetEntry}"
-                elif ext in (".c", ".cpp"):
-                    autoCmd = f"gcc {targetEntry} -o main.exe && main.exe" if os.name == "nt" else f"gcc {targetEntry} -o main && ./main"
-                elif ext == ".java":
-                    autoCmd = f"javac {targetEntry} && java {Path(targetEntry).stem}"
-                else:
-                    autoCmd = f"python {targetEntry}"
-                print(f"\n[Tester Execution Proposal] {autoCmd}")
-                autoRes = executeCommand.invoke({"command": autoCmd})
-                autoRecord = f"Auto-Execution: command='{autoCmd}' | {autoRes}"
-                allRunTools.append(autoRecord)
-                appRunTools.append(autoRecord)
-                appOutput = "\n".join(appRunTools)
-                hasRunApp = True
-                hasZeroExit = "Exit Code: 0" in appOutput
-                hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput
-                if hasZeroExit and not hasError:
-                    testerMessage = "PASS"
-                    break
-                else:
-                    testerMessage = f"FAIL: Application execution failed with error:\n{appOutput}"
-                    print("\n[Tester] Auto-execution failed. Delegating diagnostic to Coder Agent.")
-                    break
+        if untestedSubprojects and hasRunApp and allAppExitsZero and not hasError and not failedRunTools:
+            promptNote = f"Subproject(s) {untestedSubprojects} have not been verified yet. Execute the build, test, or run command for {untestedSubprojects}."
+            runMessages.extend([
+                testerResponse,
+                HumanMessage(content=promptNote)
+            ])
+            continue
 
-            promptNote = f"Output an executeCommand tool call to run the application [{hintsStr}]."
-            if onlySetupRun:
-                promptNote = f"Dependencies installed. Now execute the application entrypoint: [{hintsStr}]."
+        if (not runTools and not hasRunApp) or onlySetupRun:
+            targetSub = untestedSubprojects[0] if untestedSubprojects else subprojects[0]
+            promptNote = f"Dependencies installed. Now execute the build, test, or verification command for subproject '{targetSub}'."
             runMessages.extend([
                 testerResponse,
                 HumanMessage(content=promptNote)
@@ -908,28 +1062,65 @@ def testerNode(state: AgentState) -> dict:
 
         runMessages.extend([
             testerResponse,
-            HumanMessage(content="Terminal output:\n" + "\n".join(allRunTools) + "\n\nIf dependency installation succeeded, now execute the application entrypoint. If execution already passed cleanly, respond strictly with PASS. If code logic bugs remain, respond strictly with FAIL and diagnostic details.")
+            HumanMessage(content="Terminal output:\n" + "\n".join(allRunTools) + f"\n\nContinue verification for remaining subprojects {untestedSubprojects if untestedSubprojects else subprojects}. If all subprojects pass cleanly, respond strictly with PASS. If build or logic bugs remain, respond strictly with FAIL and diagnostic details.")
         ])
 
     appRunTools = [tr for tr in allRunTools if extractCommand(tr) and not isSetupCommand(extractCommand(tr))]
     appOutput = "\n".join(appRunTools)
-    hasZeroExit = "Exit Code: 0" in appOutput
-    hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput
-    isPass = bool(appRunTools) and hasZeroExit and not hasError
+    allAppExitsZero = bool(appRunTools) and all("Exit Code: 0" in tr for tr in appRunTools)
+    hasError = "Traceback" in appOutput or "Error:" in appOutput or "Exception:" in appOutput or "error during build" in appOutput.lower()
+    testedSubprojects = set()
+    for tr in appRunTools:
+        extractedCmd = extractCommand(tr)
+        for sub in subprojects:
+            if sub == "." or f"cd {sub}" in extractedCmd or f"/{sub}/" in extractedCmd or extractedCmd.startswith(f"{sub}/") or f" {sub}" in extractedCmd:
+                testedSubprojects.add(sub)
+    allSubprojectsTested = bool(subprojects) and all(s in testedSubprojects for s in subprojects)
+
+    failedCommands = []
+    for tr in allRunTools:
+        hasZero = "Exit Code: 0" in tr
+        hasErrToken = "Traceback" in tr or "Error:" in tr or "Exception:" in tr or "error during build" in tr.lower() or "SyntaxError" in tr or "Cannot find module" in tr or "MODULE_NOT_FOUND" in tr
+        if not hasZero or hasErrToken:
+            if hasZero and "STDERR:" in tr and "npm warn" in tr and not hasErrToken:
+                continue
+            failedCommands.append(tr)
+
+    isPass = bool(appRunTools) and allAppExitsZero and not hasError and not failedCommands and allSubprojectsTested
     if isPass:
         if currentManifestHashes:
             verifiedManifestHashes.update(currentManifestHashes)
         print("\nProcess finished successfully.\n")
     else:
+        if failedCommands:
+            failureDetails = "\n\n".join(failedCommands)
+        elif appOutput:
+            failureDetails = appOutput
+        elif allRunTools:
+            failureDetails = "\n\n".join(allRunTools)
+        else:
+            failureDetails = testerMessage if testerMessage and testerMessage.strip() != "PASS" else "Execution failed: Application build or verification commands failed or were not executed."
         try:
             print("\n[MEMORY] Execution failed. Tester Agent is generating a lesson...")
-            memoryManager.learnFromFailure(state["instruction"], appOutput or "\n".join(allRunTools) or testerMessage)
+            memoryManager.learnFromFailure(state["instruction"], failureDetails)
         except Exception as e:
             print(f"[MEMORY] Error generating lesson from failure: {e}")
 
+    if not isPass:
+        if failedCommands:
+            failureFeedback = "\n\n".join(failedCommands)
+        elif appOutput:
+            failureFeedback = appOutput
+        elif allRunTools:
+            failureFeedback = "\n\n".join(allRunTools)
+        else:
+            failureFeedback = testerMessage if testerMessage and testerMessage.strip() != "PASS" else "Execution failed: Application build or verification commands failed or were not executed."
+    else:
+        failureFeedback = state["feedback"]
+
     return {
         "messages": [testerResponse] if testerResponse else [],
-        "feedback": state["feedback"] if isPass else f"Tester Execution Failed:\n{appOutput or testerMessage}",
+        "feedback": failureFeedback if isPass else f"Tester Execution Failed:\n{failureFeedback}",
         "success": isPass
     }
 
@@ -937,6 +1128,10 @@ def routeCritic(state: AgentState) -> str:
     if not state.get("success", False):
         return END
     if state.get("isAssetOnly", False):
+        return END
+    instText = state.get("instruction", "").lower()
+    isFinal = any(w in instText for w in ("final", "integrate", "playtest", "verification"))
+    if not isFinal:
         return END
     return "tester"
 
@@ -954,7 +1149,7 @@ evalBuilder.add_conditional_edges("tester", routeTester, {END: END})
 evalWorkflow = evalBuilder.compile()
 
 def runCoder(instruction, taskContext="", feedback=""):
-    context = getContext(instruction)
+    context = getCoderContext(instruction, workDir=str(WORK_DIR))
     retrievedMemories = []
     if shouldRetrieveMemory(instruction):
         try:
@@ -977,22 +1172,24 @@ def runCoder(instruction, taskContext="", feedback=""):
     }
     return coderNode(initialState)
 
-def runBatchEval(batchTasks, coderResults):
+def runBatchEval(batchTasks, coderResults, isFinal=False):
     taskNames = ", ".join([getattr(t, "name", getattr(t, "objective", t.id)) for t in batchTasks])
-    print(f"\n[Batch Verification] Verifying {len(batchTasks)} completed task(s): {taskNames}")
+    header = "[Project Verification]" if isFinal else "[Milestone Review]"
+    print(f"\n{header} Evaluating {len(batchTasks)} completed task(s): {taskNames}")
 
     isValid, connErrors = validateConnectedness(WORK_DIR)
     if not isValid:
         errMsg = "\n".join(f"- {e}" for e in connErrors)
-        print(f"[Batch Verification] AST/Syntax errors detected:\n{errMsg}")
+        print(f"{header} AST/Syntax errors detected:\n{errMsg}")
 
     summaryText = "\n".join([f"- Task '{getattr(t, 'name', t.id)}': {res.get('coderMessage', '')}" for t, res in zip(batchTasks, coderResults)])
     combinedTools = sum([res.get("toolResults", []) for res in coderResults], [])
     manifestText = formatManifestContext(WORK_DIR)
 
+    instPrefix = "Final Project Verification" if isFinal else "Batch Review"
     initialState = {
-        "messages": [HumanMessage(content=f"Verify batch tasks: {taskNames}\nCoder Summaries:\n{summaryText}\n\nWorkspace Status:\n{manifestText}")],
-        "instruction": f"Batch Verification: {taskNames}",
+        "messages": [HumanMessage(content=f"{instPrefix}: {taskNames}\nCoder Summaries:\n{summaryText}\n\nWorkspace Status:\n{manifestText}")],
+        "instruction": f"{instPrefix}: {taskNames}",
         "taskContext": summaryText,
         "context": manifestText,
         "coderMessage": summaryText,
@@ -1007,16 +1204,16 @@ def runBatchEval(batchTasks, coderResults):
     passed = finalState.get("success", False)
     fb = finalState.get("feedback", "")
     if passed:
-        print("[Batch Verification] Execution tests PASSED.")
+        print(f"{header} PASSED.")
         updateWorkspaceSnapshot(WORK_DIR)
     else:
-        print(f"[Batch Verification] Execution tests FAILED: {fb}")
+        print(f"{header} FAILED: {fb}")
     return passed, fb
 
 def runAgent(instruction, taskContext=""):
-    print("Indexing workspace: ")
-    indexWorkspace()
-    context = getContext(instruction)
+    print("Preloading workspace into CAG cache: ")
+    loadCag(str(WORK_DIR))
+    context = getCoderContext(instruction, workDir=str(WORK_DIR))
     initialState = {
         "messages": [HumanMessage(content=instruction)],
         "instruction": instruction,
@@ -1035,6 +1232,35 @@ def runAgent(instruction, taskContext=""):
         return True, finalState.get("coderMessage", "Task completed.")
     return False, finalState.get("feedback", "Execution failed")
 
+def printProjectSummary(goal: str, techStack: str, taskOutputs: dict, workDir: Path) -> None:
+    skipDirs = {"node_modules", "__pycache__", "dist", "build", ".git", ".venv", "venv", "chroma_db", "graphify-out"}
+    createdFiles = []
+    if workDir.exists():
+        for f in workDir.rglob("*"):
+            if f.is_file() and not any(p.startswith(".") or p in skipDirs for p in f.parts):
+                createdFiles.append(str(f.relative_to(workDir)))
+    fileListStr = "\n".join(f"  - {f}" for f in sorted(createdFiles))
+    taskSummaries = "\n".join(f"- {msg.splitlines()[0]}" for msg in taskOutputs.values() if msg)
+    cleanGoal = goal.split("\n")[0] if goal else "Project Implementation"
+    prompt = (
+        f"Goal: {cleanGoal}\nTech Stack: {techStack}\nCreated Files:\n{fileListStr}\nTask Highlights:\n{taskSummaries}\n\n"
+        "Generate a concise, user-friendly project completion summary for the terminal:\n"
+        "1. What was built\n"
+        "2. Key features & file structure\n"
+        "3. How to run / verify the project\n"
+        "Keep it crisp, professional, and well-structured."
+    )
+    print("\n" + "=" * 60)
+    print("[Kaizen Project Summary]\n")
+    try:
+        resp = get_llm().invoke([HumanMessage(content=prompt)])
+        content = resp.content
+        summaryText = "".join(p if isinstance(p, str) else p.get("text", "") for p in content) if isinstance(content, list) else str(content)
+        print(summaryText.strip())
+    except Exception:
+        print(f"Goal: {cleanGoal}\nTech Stack: {techStack}\n\nFiles Created:\n{fileListStr}\n")
+    print("=" * 60 + "\n")
+
 if __name__ == "__main__":
     startLogging()
     print("\nType 'index' for reindexing or 'exit' to quit.\n")
@@ -1044,9 +1270,21 @@ if __name__ == "__main__":
         if q == "exit":
             break
         if q == "index":
-            indexWorkspace()
-            print("Reindexed the workspace")
+            loadCag(str(WORK_DIR))
+            print("Preloaded workspace into CAG cache")
         elif q:
+            targetBranch = ""
+            ownerName, repoName, issueNum = gitHubAgent.parseIssueUrl(query)
+            if ownerName and repoName and issueNum:
+                issueData = gitHubAgent.fetchIssue(ownerName, repoName, issueNum)
+                if issueData:
+                    issueTitle = issueData.get("title", "")
+                    issueBody = issueData.get("body", "")
+                    print(f"\n[GitHub Agent] Loaded Issue #{issueNum}: {issueTitle}")
+                    targetBranch = f"fix/issue-{issueNum}"
+                    gitHubAgent.createBranch(targetBranch)
+                    query = f"Fix GitHub Issue #{issueNum}: {issueTitle}\n\n{issueBody}" if issueBody else f"Fix GitHub Issue #{issueNum}: {issueTitle}"
+
             retrievedMemories = []
             if shouldRetrieveMemory(query):
                 try:
@@ -1059,7 +1297,7 @@ if __name__ == "__main__":
 
             if mode == "patch":
                 print("\n[Kaizen] Patch mode detected, skipping full planning pipeline.\n")
-                indexWorkspace()
+                loadCag(str(WORK_DIR))
                 patchInstruction = buildPatchInstruction(query, WORK_DIR)
                 if retrievedMemories:
                     memStr = "\n".join(f"- {m}" for m in retrievedMemories)
@@ -1067,12 +1305,13 @@ if __name__ == "__main__":
                 patchResult = runCoder(patchInstruction)
                 patchSummary = patchResult.get("coderMessage", "").strip() if isinstance(patchResult, dict) else ""
                 if patchSummary:
-                    print("\n" + "-" * 60)
+                    print("\n" + "=" * 60)
                     print("[Kaizen] Patch complete,here is what was changed:\n")
                     print(patchSummary)
-                    print("-" * 60 + "\n")
+                    print("=" * 60 + "\n")
                 else:
                     print("\n[Kaizen] Patch complete.\n")
+                gitHubAgent.publish(query, targetBranch)
             else:
                 promptAgent = PromptAgent()
                 curQuery = query
@@ -1084,6 +1323,7 @@ if __name__ == "__main__":
                 if existingAst and "Workspace is currently empty" not in existingAst:
                     curQuery = f"{curQuery}\n\nExisting Workspace Code & Structure:\n{existingAst}"
 
+                baseQuery = curQuery
                 while True:
                     promptOutput = promptAgent.process(curQuery)
                     deliverables = promptOutput.get("deliverables", [])
@@ -1092,7 +1332,8 @@ if __name__ == "__main__":
                     proceed, usrFeedback = reviewDeliverables(deliverables, techStack, fileStructure)
                     if proceed:
                         break
-                    curQuery = f"{query}\nUser Plan Feedback: {usrFeedback}"
+                    pastPlan = json.dumps({"tech_stack": techStack, "file_structure": fileStructure, "deliverables": deliverables}, indent=2)
+                    curQuery = f"{baseQuery}\n\nPrevious Proposed Plan:\n{pastPlan}\n\nUser Plan Feedback: {usrFeedback}\nPlease update the plan by addressing the user feedback while referencing the previous plan."
                     print("\nRegenerating plan based on your feedback...\n")
 
                 plannerAgent = PlannerAgent()
@@ -1114,6 +1355,8 @@ if __name__ == "__main__":
                 print("\nExecution Order:")
                 print(dag.topologicalSort())
 
-                indexWorkspace()
+                loadCag(str(WORK_DIR))
                 scheduler = Scheduler(dag, curQuery, techStack=techStack, fileStructure=fileStructure, coderFn=runCoder, evalFn=runBatchEval)
                 asyncio.run(scheduler.run())
+                printProjectSummary(query, techStack, scheduler.taskOutputs, WORK_DIR)
+                gitHubAgent.publish(curQuery, targetBranch)

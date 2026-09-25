@@ -99,9 +99,9 @@ def buildPatchInstruction(userInstruction: str, workDir: Path) -> str:
     workspaceSnapshot = readWorkspaceFiles(workDir)
 
     parts = [
-        "PATCH MODE - Do NOT rebuild from scratch.",
-        "Read the relevant existing files first using readFile, then make only the targeted changes needed.",
-        "Never regenerate files that are already working.",
+        "PATCH MODE - Targeted updates and additions.",
+        "You can create new files with createFile or createFiles whenever new assets, files, or utilities are needed.",
+        "For existing files, inspect them with readFile and make targeted modifications.",
         "",
         f"User instruction: {userInstruction.strip()}",
     ]
