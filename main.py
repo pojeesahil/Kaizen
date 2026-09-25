@@ -32,7 +32,15 @@ from core.tools import (
     WORK_DIR
 )
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
-from rag.rag import indexWorkspace, getContext
+from cag.cag import (
+    loadCag,
+    getCagContext,
+    updateCagFile,
+    getCoderContext,
+    indexWorkspace,
+    getContext,
+    updateWorkspaceFile
+)
 from agents.prompt import PromptAgent
 from agents.planneragent import PlannerAgent
 from agents.patchclassifier import classifyIntent, buildPatchInstruction
@@ -455,6 +463,7 @@ QA Feedback to Address:
             break
 
         autoFixImports(WORK_DIR)
+        loadCag(str(WORK_DIR))
         liveAst = formatManifestContext(WORK_DIR)
         obsText = "\n".join(toolResults)
 
@@ -474,6 +483,7 @@ QA Feedback to Address:
         ])
 
     autoFixImports(WORK_DIR)
+    loadCag(str(WORK_DIR))
 
     return {
         "iteration": iteration,
@@ -1139,7 +1149,7 @@ evalBuilder.add_conditional_edges("tester", routeTester, {END: END})
 evalWorkflow = evalBuilder.compile()
 
 def runCoder(instruction, taskContext="", feedback=""):
-    context = getContext(instruction)
+    context = getCoderContext(instruction, workDir=str(WORK_DIR))
     retrievedMemories = []
     if shouldRetrieveMemory(instruction):
         try:
@@ -1201,9 +1211,9 @@ def runBatchEval(batchTasks, coderResults, isFinal=False):
     return passed, fb
 
 def runAgent(instruction, taskContext=""):
-    print("Indexing workspace: ")
-    indexWorkspace()
-    context = getContext(instruction)
+    print("Preloading workspace into CAG cache: ")
+    loadCag(str(WORK_DIR))
+    context = getCoderContext(instruction, workDir=str(WORK_DIR))
     initialState = {
         "messages": [HumanMessage(content=instruction)],
         "instruction": instruction,
@@ -1260,8 +1270,8 @@ if __name__ == "__main__":
         if q == "exit":
             break
         if q == "index":
-            indexWorkspace()
-            print("Reindexed the workspace")
+            loadCag(str(WORK_DIR))
+            print("Preloaded workspace into CAG cache")
         elif q:
             targetBranch = ""
             ownerName, repoName, issueNum = gitHubAgent.parseIssueUrl(query)
@@ -1287,7 +1297,7 @@ if __name__ == "__main__":
 
             if mode == "patch":
                 print("\n[Kaizen] Patch mode detected, skipping full planning pipeline.\n")
-                indexWorkspace()
+                loadCag(str(WORK_DIR))
                 patchInstruction = buildPatchInstruction(query, WORK_DIR)
                 if retrievedMemories:
                     memStr = "\n".join(f"- {m}" for m in retrievedMemories)
@@ -1345,7 +1355,7 @@ if __name__ == "__main__":
                 print("\nExecution Order:")
                 print(dag.topologicalSort())
 
-                indexWorkspace()
+                loadCag(str(WORK_DIR))
                 scheduler = Scheduler(dag, curQuery, techStack=techStack, fileStructure=fileStructure, coderFn=runCoder, evalFn=runBatchEval)
                 asyncio.run(scheduler.run())
                 printProjectSummary(query, techStack, scheduler.taskOutputs, WORK_DIR)

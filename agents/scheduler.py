@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Callable, Optional
 from agents.dag import DAG
-from rag.rag import indexWorkspace
+from cag.cag import loadCag, indexWorkspace
 from core.connectedness import formatManifestContext, validateConnectedness, autoFixImports
 from langchain_core.messages import HumanMessage
 from core.config import get_llm
@@ -226,7 +226,7 @@ class Scheduler:
                     coderResults.append(repairResult)
                 autoFixImports(self.workDir)
 
-            await asyncio.to_thread(indexWorkspace)
+            await asyncio.to_thread(loadCag, str(self.workDir))
 
             completedTasks.extend(batch)
             allCoderResults.extend(coderResults)
@@ -249,7 +249,7 @@ class Scheduler:
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=fb)
                         coderResults.append(fixRes)
                         allCoderResults.append(fixRes)
-                        await asyncio.to_thread(indexWorkspace)
+                        await asyncio.to_thread(loadCag, str(self.workDir))
 
                         passed, fb = await asyncio.to_thread(self.evalFn, batch, coderResults, False)
                         if passed:
@@ -298,7 +298,7 @@ class Scheduler:
                         enhancedFb = f"{fb}\n\n[Pre-Repair Triage Analysis]:\n{triageDiagnosis}" if triageDiagnosis else fb
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=enhancedFb)
                         allCoderResults.append(fixRes)
-                        await asyncio.to_thread(indexWorkspace)
+                        await asyncio.to_thread(loadCag, str(self.workDir))
 
                         passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults, True)
                         if passed:

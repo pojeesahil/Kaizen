@@ -14,6 +14,15 @@ from core.config import autoApprove
 
 WORK_DIR = Path(__file__).resolve().parent.parent / "work"
 
+def syncCag(filePath: Path):
+    try:
+        from cag.cag import updateCagFile
+        updateCagFile(str(filePath), baseDir=str(WORK_DIR))
+    except Exception:
+        pass
+
+_syncCAG = syncCag
+
 def resolvePath(path: str) -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     targetPath = Path(path)
@@ -33,6 +42,7 @@ def createFile(path: str, content: str) -> str:
     filePath.parent.mkdir(parents=True, exist_ok=True)
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(content)
+    syncCag(filePath)
     return f"Success: Created file at {filePath}"
 
 @tool
@@ -49,6 +59,7 @@ def createFiles(files: dict) -> str:
             filePath.parent.mkdir(parents=True, exist_ok=True)
             with open(filePath, "w", encoding="utf-8") as f:
                 f.write(str(content))
+            syncCag(filePath)
             createdPaths.append(str(filePath))
         except Exception as err:
             failedPaths.append(f"{relPath}: {str(err)}")
@@ -72,6 +83,7 @@ def downloadAsset(url: str, path: str) -> str:
             data = resp.read()
         with open(dest, "wb") as f:
             f.write(data)
+        syncCag(dest)
         return f"Success: Downloaded {url} to {dest}"
     except Exception as err:
         return f"Error downloading asset from '{url}': {err}"
@@ -84,6 +96,8 @@ def moveFile(sourcePath: str, destinationPath: str) -> str:
         dst = resolvePath(destinationPath)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
+        syncCag(src)
+        syncCag(dst)
         return f"Success: Moved {src} to {dst}"
     except Exception as err:
         return f"Error moving file: {err}"
@@ -111,6 +125,7 @@ def editFile(path: str, newContent: str) -> str:
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(merged)
+    syncCag(filePath)
     return f"Success: Modified file at {filePath}"
 
 def findBalancedBlock(src: str, openBraceIdx: int) -> int:
@@ -244,6 +259,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(functionCode.strip() + "\n")
+        syncCag(filePath)
         names = ", ".join(n.name for n in fnNodes) if fnNodes else "function"
         return f"Success: Created {filePath} with function(s) '{names}'"
 
@@ -317,6 +333,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
 
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(src)
+        syncCag(filePath)
         return f"Success: Upserted function(s) '{', '.join(processedNames)}' in {filePath}"
 
     # Universal non-Python or regex-based replacement
@@ -333,6 +350,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
     if replaced:
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(newSrc)
+        syncCag(filePath)
         return f"Success: Modified existing function '{fnName}' in-place in {filePath}"
 
     spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
@@ -340,6 +358,7 @@ def upsertFunction(path: str, functionCode: str) -> str:
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(src)
+    syncCag(filePath)
     return f"Success: Added function '{fnName}' to {filePath}"
 
 @tool
@@ -360,6 +379,7 @@ def upsertClass(path: str, classCode: str) -> str:
     if not filePath.exists():
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(classCode.strip() + "\n")
+        syncCag(filePath)
         names = ", ".join(n.name for n in clsNodes) if clsNodes else "class"
         return f"Success: Created {filePath} with class(es) '{names}'"
 
@@ -403,6 +423,7 @@ def upsertClass(path: str, classCode: str) -> str:
 
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(src)
+        syncCag(filePath)
         return f"Success: Upserted class(es) '{', '.join(processedNames)}' in {filePath}"
 
     # Universal non-Python or regex-based replacement
@@ -416,6 +437,7 @@ def upsertClass(path: str, classCode: str) -> str:
     if replaced:
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(newSrc)
+        syncCag(filePath)
         return f"Success: Modified existing class '{clsName}' in-place in {filePath}"
 
     spacing = "\n\n" if src and not src.endswith("\n\n") else "\n" if src and not src.endswith("\n") else ""
@@ -423,6 +445,7 @@ def upsertClass(path: str, classCode: str) -> str:
 
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(src)
+    syncCag(filePath)
     return f"Success: Added class '{clsName}' to {filePath}"
 
 @tool
@@ -443,11 +466,13 @@ def appendToFile(path: str, content: str) -> str:
         newBody = f"{prefix}\n\n{content.strip()}\n\n{mainBlock}\n"
         with open(filePath, "w", encoding="utf-8") as f:
             f.write(newBody)
+        syncCag(filePath)
         return f"Success: Appended content before main entrypoint in {filePath}"
 
     spacing = "\n\n" if existing and not existing.endswith("\n\n") else "\n" if existing and not existing.endswith("\n") else ""
     with open(filePath, "a", encoding="utf-8") as f:
         f.write(spacing + content.strip() + "\n")
+    syncCag(filePath)
     return f"Success: Appended content to {filePath}"
 
 @tool
@@ -468,6 +493,7 @@ def replaceBlock(path: str, targetSnippet: str, replacementSnippet: str) -> str:
     updated = content.replace(targetSnippet, replacementSnippet, 1)
     with open(filePath, "w", encoding="utf-8") as f:
         f.write(updated)
+    syncCag(filePath)
     return f"Success: Replaced block in {filePath}"
 
 @tool
@@ -480,9 +506,11 @@ def deleteResource(path: str) -> str:
         return f"Error: {path} not found."
     if resPath.is_dir():
         shutil.rmtree(resPath)
+        syncCag(resPath)
         return f"Success: Deleted folder {resPath}"
     else:
         resPath.unlink()
+        syncCag(resPath)
         return f"Success: Deleted file {resPath}"
 
 @tool
