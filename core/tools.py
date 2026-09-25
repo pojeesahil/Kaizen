@@ -566,8 +566,15 @@ def executeCommand(command: str) -> str:
     if autoApprove:
         confirm = "y"
     else:
-        confirm = input("Execute command? (y/n): ").strip().lower()
-    if confirm != 'y':
+        confirm = input("Execute command? (y/n): ").strip()
+    if confirm.lower() != "y":
+        guidance = ""
+        if confirm.lower() == "n":
+            guidance = input("What should Tester execute instead? (press Enter to skip): ").strip()
+        elif confirm:
+            guidance = confirm
+        if guidance:
+            return f"Command execution rejected by user. User instruction on what to execute: '{guidance}'. Follow this instruction strictly."
         return "Command execution rejected by user."
 
     try:

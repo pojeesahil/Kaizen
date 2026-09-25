@@ -37,12 +37,14 @@ class streamingPlanner:
 
         plansList: List[deliverablePlan] = []
         totalCount = len(deliverablesList) or 1
+        techStack = promptAgentOutput.get("tech_stack") or promptAgentOutput.get("techStack") or ""
+        fileStructure = promptAgentOutput.get("file_structure") or promptAgentOutput.get("fileStructure") or []
         for indexVal, targetDeliverable in enumerate(deliverablesList, start=1):
             yield planningEvent(stage = "deliverable", icon = "Plan", message=f"Planning {targetDeliverable.name}", deliverableName = targetDeliverable.name, progress=(indexVal-1) / totalCount)
             yield planningEvent(stage = "deliverable", icon = "...", message=self._thinkingSummary(targetDeliverable), deliverableName = targetDeliverable.name)
             yield planningEvent(stage = "deliverable", icon = "...", message="Decomposing into tasks...", deliverableName = targetDeliverable.name)
 
-            planItem = self.planner.plan(targetDeliverable)
+            planItem = self.planner.plan(targetDeliverable, techStack=techStack, fileStructure=fileStructure)
             plansList.append(planItem)
 
             yield planningEvent(stage = "deliverable", icon="OK", message = f"Plan generated ({len(planItem.tasks)} tasks)", deliverableName=targetDeliverable.name, progress=indexVal / totalCount)

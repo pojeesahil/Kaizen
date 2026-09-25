@@ -2,6 +2,7 @@ import os
 import json
 import subprocess
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 class GitHubAgent:
@@ -121,30 +122,99 @@ class GitHubAgent:
         code, _, _ = self.runGitCommand(["commit", "-m", cleanMsg])
         return code == 0
 
+    def createRemoteRepo(self, repoName: str, isPrivate: bool = False, description: str = "") -> str:
+        if not self.token:
+            print("\nA GitHub Personal Access Token (with 'repo' scope) is required to create repositories.")
+            tokenInput = input("Enter GitHub Personal Access Token: ").strip()
+            if not tokenInput:
+                print("Repository creation aborted: No token provided.")
+                return ""
+            self.token = tokenInput
+
+        payload = {
+            "name": repoName,
+            "private": isPrivate,
+            "description": description
+        }
+        reqData = json.dumps(payload).encode("utf-8")
+        headers = {
+            "User-Agent": "Kai-GitHubAgent",
+            "Accept": "application/vnd.github.v3+json",
+            "Authorization": f"token {self.token}",
+            "Content-Type": "application/json"
+        }
+        apiUrl = "https://api.github.com/user/repos"
+        try:
+            req = urllib.request.Request(apiUrl, data=reqData, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resJson = json.loads(resp.read().decode("utf-8"))
+                cloneUrl = resJson.get("clone_url", "")
+                fullName = resJson.get("full_name", "")
+                print(f"\n[GitHub] Successfully created repository '{fullName}'")
+                return cloneUrl
+        except urllib.error.HTTPError as err:
+            errBody = err.read().decode("utf-8") if err.fp else ""
+            print(f"\n[GitHub Error] Failed to create repository: HTTP {err.code} {err.reason}")
+            if errBody:
+                try:
+                    errData = json.loads(errBody)
+                    errMsg = errData.get("message", "")
+                    if errMsg:
+                        print(f"Details: {errMsg}")
+                except Exception:
+                    pass
+            return ""
+        except Exception as err:
+            print(f"\n[GitHub Error] Failed to create repository: {err}")
+            return ""
+
     def publish(self, goal: str, targetBranch: str = "") -> bool:
         self.ensureRepo()
         currentBranch = targetBranch or self.getCurrentBranch()
         remoteUrl = self.getRemoteUrl()
 
         print("\n[GitHub Publishing]")
-        if remoteUrl:
-            print(f"Detected Remote Origin: {remoteUrl}")
-        else:
-            print("No remote origin configured.")
-
-        print(f"Target Branch: {currentBranch}")
         confirm = input("Publish and push to GitHub? (y/n): ").strip().lower()
         if confirm != "y":
             print("GitHub publishing skipped by user.")
             return False
 
-        if not remoteUrl:
-            remoteInput = input("Enter remote repository URL (e.g. https://github.com/user/repo.git): ").strip()
-            if not remoteInput:
-                print("Publishing cancelled: No remote repository provided.")
+        if remoteUrl:
+            print(f"Detected remote origin: {remoteUrl}")
+
+        print("\nRepository Destination:")
+        print("1. Push to existing repository")
+        print("2. Create a new remote repository on GitHub")
+        repoChoice = input("Choose option (1/2) [1]: ").strip()
+
+        if repoChoice == "2":
+            folderName = self.workDir.name if self.workDir.name else "kai-project"
+            defaultRepoName = folderName.replace(" ", "-").lower()
+            nameInput = input(f"Enter repository name [{defaultRepoName}]: ").strip()
+            chosenRepoName = nameInput if nameInput else defaultRepoName
+            privInput = input("Make repository private? (y/n) [n]: ").strip().lower()
+            isPrivate = privInput == "y"
+            createdUrl = self.createRemoteRepo(chosenRepoName, isPrivate, goal)
+            if not createdUrl:
+                print("Failed to create remote repository. Publishing aborted.")
                 return False
-            self.runGitCommand(["remote", "add", "origin", remoteInput])
-            remoteUrl = remoteInput
+            if remoteUrl:
+                self.runGitCommand(["remote", "remove", "origin"])
+            self.runGitCommand(["remote", "add", "origin", createdUrl])
+            remoteUrl = createdUrl
+        else:
+            if not remoteUrl:
+                remoteInput = input("Enter remote repository URL (e.g. https://github.com/user/repo.git): ").strip()
+                if not remoteInput:
+                    print("Publishing cancelled: No remote repository provided.")
+                    return False
+                self.runGitCommand(["remote", "add", "origin", remoteInput])
+                remoteUrl = remoteInput
+            else:
+                remoteInput = input(f"Press Enter to use [{remoteUrl}] or enter new URL: ").strip()
+                if remoteInput:
+                    self.runGitCommand(["remote", "set-url", "origin", remoteInput])
+                    remoteUrl = remoteInput
 
         branchInput = input(f"Branch to push [{currentBranch}]: ").strip()
         finalBranch = branchInput if branchInput else currentBranch
@@ -157,6 +227,12 @@ class GitHubAgent:
 
         print(f"Pushing to {remoteUrl} on branch '{finalBranch}'...")
         code, out, err = self.runGitCommand(["push", "-u", "origin", finalBranch])
+        if code != 0 and self.token and "https://" in remoteUrl and "@" not in remoteUrl:
+            tokenUrl = remoteUrl.replace("https://", f"https://{self.token}@")
+            self.runGitCommand(["remote", "set-url", "origin", tokenUrl])
+            code, out, err = self.runGitCommand(["push", "-u", "origin", finalBranch])
+            self.runGitCommand(["remote", "set-url", "origin", remoteUrl])
+
         if code == 0:
             print(f"\n[GitHub] Successfully pushed to {finalBranch}!")
             return True

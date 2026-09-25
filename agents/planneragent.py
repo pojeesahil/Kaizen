@@ -26,10 +26,12 @@ class plannerAgent:
     def plan(self, promptAgentOutput: Dict[str, Any]) -> dagPlan:
         deliverablesList = self.detector.detect(promptAgentOutput)
         resolvedDeliverables = self.resolver.resolve(deliverablesList)
+        techStack = promptAgentOutput.get("tech_stack") or promptAgentOutput.get("techStack") or ""
+        fileStructure = promptAgentOutput.get("file_structure") or promptAgentOutput.get("fileStructure") or []
 
         plansList = []
         for targetDeliverable in resolvedDeliverables:
-            planItem = self.planner.plan(targetDeliverable)
+            planItem = self.planner.plan(targetDeliverable, techStack=techStack, fileStructure=fileStructure)
             plansList.append(planItem)
 
         combinedPlan = self.merger.merge(plansList, resolvedDeliverables)

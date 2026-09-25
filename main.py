@@ -268,24 +268,15 @@ testerModel = llm.bind_tools(testerTools)
 agentModel = llm.bind_tools(tools)
 
 def streamInvoke(model, messages):
-    for attempt in range(3):
-        try:
-            fullResponse = None
-            for chunk in model.stream(messages):
-                if chunk.content:
-                    cleanChunk = extractText(chunk.content)
-                    if cleanChunk:
-                        print(cleanChunk, end="", flush=True)
-                fullResponse = chunk if fullResponse is None else fullResponse + chunk
-            print("\n")
-            return fullResponse
-        except Exception as err:
-            errStr = str(err).lower()
-            if ("429" in errStr or "resource exhausted" in errStr) and attempt < 2:
-                print(f"\n[Rate Limit] Backing off for {(attempt + 1) * 5}s...")
-                time.sleep((attempt + 1) * 5)
-                continue
-            raise err
+    fullResponse = None
+    for chunk in model.stream(messages):
+        if chunk.content:
+            cleanChunk = extractText(chunk.content)
+            if cleanChunk:
+                print(cleanChunk, end="", flush=True)
+        fullResponse = chunk if fullResponse is None else fullResponse + chunk
+    print("\n")
+    return fullResponse
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
@@ -364,11 +355,9 @@ def coderNode(state: AgentState) -> dict:
     if isPatchMode:
         patchModeDirective = (
             "\nPATCH MODE ACTIVE:\n"
-            "- The user is asking you to fix or adjust something specific — NOT rebuild the project.\n"
-            "- Your first action MUST be to use readFile on the relevant file(s) before touching anything.\n"
-            "- Only edit the lines/functions that are broken. Leave all other working code untouched.\n"
-            "- Never use createFile for a file that already exists in the workspace.\n"
-            "- Never regenerate an entire module because one function inside it is broken.\n"
+            "- You can create new files using createFile or createFiles whenever new assets, files, or components are needed.\n"
+            "- For existing files, inspect them with readFile first and make targeted edits using editFile or replaceBlock.\n"
+            "- Leave all other working code untouched.\n"
         )
 
     coderPretext = f"""You are a senior software engineer working in a multi-file workspace.
@@ -446,6 +435,10 @@ QA Feedback to Address:
         toolResults = executeToolCalls(coderResponse, coderTools)
 
         if not toolResults:
+            if turn < 2 and not allToolResults:
+                nudge = "You have not executed any tools yet. You must use tool calls (createFile, createFiles, editFile, replaceBlock, readFile) to inspect or modify code. Call the appropriate tool now."
+                coderMessages.extend([coderResponse, HumanMessage(content=nudge)])
+                continue
             break
 
         allToolResults.extend(toolResults)
@@ -672,6 +665,10 @@ def criticNode(state: AgentState) -> dict:
             if rel.lower() in instLower or Path(rel).name.lower() in instLower:
                 changedFiles.append(rel)
     changedFiles.sort()
+    if not changedFiles:
+        entryCandidates = ("main", "app", "index", "server")
+        entryFiles = [f for f in allSnapshot if any(c in Path(f).stem.lower() for c in entryCandidates)]
+        changedFiles = entryFiles if entryFiles else allSnapshot[:5]
 
     if isAssetOnlyTask(state["instruction"], changedFiles):
         print("\n[Critic Tier 1: Micro] Asset/Documentation task verified via workspace file state.")
@@ -689,6 +686,8 @@ def criticNode(state: AgentState) -> dict:
         "You are an expert Micro Code Critic reviewing task-level code modifications.\n"
         "Review the modified files and task instructions strictly for correctness, missing method calls, and stub implementations.\n"
         "Existing workspace files from prior completed milestones are established and do not need re-modification.\n"
+        "If a task objective specifies a file or library that contradicts the primary Target Tech Stack or existing codebase, implementing the equivalent functionality using the project's designated language/stack is acceptable.\n"
+        "If no files were modified because existing entrypoint files already fully satisfy the integration or wiring, respond strictly with PASS.\n"
         "Respond starting strictly with PASS if the changes fulfill the task without regressions, or FAIL followed by concise error details."
     )
     microInstruction = (
@@ -932,7 +931,7 @@ def testerNode(state: AgentState) -> dict:
         f"- For Python packages (files inside subdirectories), use: {pyPathPrefix}python -m <package>.<module>\n"
         "- If an application requires interactive input, test non-interactively.\n"
         "- If execution completes with Exit Code: 0 and no errors across all subprojects, respond strictly with 'PASS'.\n"
-        "- If a command is rejected or denied by the user, immediately try a similar alternative command or platform-compatible equivalent.\n"
+        "- If a command is rejected or denied by the user, immediately follow any user-provided instruction or try an alternative command.\n"
         "- If any command crashes, throws build errors, or fails, respond strictly with 'FAIL' followed by complete traceback and error diagnostics so the Coder Agent can repair the files."
     )
 
@@ -964,7 +963,7 @@ def testerNode(state: AgentState) -> dict:
                 deniedDetails = "\n".join(deniedTools)
                 promptNote = (
                     f"The user denied execution of the following command(s):\n{deniedDetails}\n\n"
-                    "Do not run the exact same command again. Instead, try a similar alternative command or different approach to accomplish this verification step."
+                    "Do not run the rejected command again. Follow the user's instruction or run the alternative command to accomplish verification."
                 )
                 runMessages.extend([
                     testerResponse,
@@ -1223,6 +1222,35 @@ def runAgent(instruction, taskContext=""):
         return True, finalState.get("coderMessage", "Task completed.")
     return False, finalState.get("feedback", "Execution failed")
 
+def printProjectSummary(goal: str, techStack: str, taskOutputs: dict, workDir: Path) -> None:
+    skipDirs = {"node_modules", "__pycache__", "dist", "build", ".git", ".venv", "venv", "chroma_db", "graphify-out"}
+    createdFiles = []
+    if workDir.exists():
+        for f in workDir.rglob("*"):
+            if f.is_file() and not any(p.startswith(".") or p in skipDirs for p in f.parts):
+                createdFiles.append(str(f.relative_to(workDir)))
+    fileListStr = "\n".join(f"  - {f}" for f in sorted(createdFiles))
+    taskSummaries = "\n".join(f"- {msg.splitlines()[0]}" for msg in taskOutputs.values() if msg)
+    cleanGoal = goal.split("\n")[0] if goal else "Project Implementation"
+    prompt = (
+        f"Goal: {cleanGoal}\nTech Stack: {techStack}\nCreated Files:\n{fileListStr}\nTask Highlights:\n{taskSummaries}\n\n"
+        "Generate a concise, user-friendly project completion summary for the terminal:\n"
+        "1. What was built\n"
+        "2. Key features & file structure\n"
+        "3. How to run / verify the project\n"
+        "Keep it crisp, professional, and well-structured."
+    )
+    print("\n" + "=" * 60)
+    print("[Kaizen Project Summary]\n")
+    try:
+        resp = get_llm().invoke([HumanMessage(content=prompt)])
+        content = resp.content
+        summaryText = "".join(p if isinstance(p, str) else p.get("text", "") for p in content) if isinstance(content, list) else str(content)
+        print(summaryText.strip())
+    except Exception:
+        print(f"Goal: {cleanGoal}\nTech Stack: {techStack}\n\nFiles Created:\n{fileListStr}\n")
+    print("=" * 60 + "\n")
+
 if __name__ == "__main__":
     startLogging()
     print("\nType 'index' for reindexing or 'exit' to quit.\n")
@@ -1285,6 +1313,7 @@ if __name__ == "__main__":
                 if existingAst and "Workspace is currently empty" not in existingAst:
                     curQuery = f"{curQuery}\n\nExisting Workspace Code & Structure:\n{existingAst}"
 
+                baseQuery = curQuery
                 while True:
                     promptOutput = promptAgent.process(curQuery)
                     deliverables = promptOutput.get("deliverables", [])
@@ -1293,7 +1322,8 @@ if __name__ == "__main__":
                     proceed, usrFeedback = reviewDeliverables(deliverables, techStack, fileStructure)
                     if proceed:
                         break
-                    curQuery = f"{query}\nUser Plan Feedback: {usrFeedback}"
+                    pastPlan = json.dumps({"tech_stack": techStack, "file_structure": fileStructure, "deliverables": deliverables}, indent=2)
+                    curQuery = f"{baseQuery}\n\nPrevious Proposed Plan:\n{pastPlan}\n\nUser Plan Feedback: {usrFeedback}\nPlease update the plan by addressing the user feedback while referencing the previous plan."
                     print("\nRegenerating plan based on your feedback...\n")
 
                 plannerAgent = PlannerAgent()
@@ -1318,4 +1348,5 @@ if __name__ == "__main__":
                 indexWorkspace()
                 scheduler = Scheduler(dag, curQuery, techStack=techStack, fileStructure=fileStructure, coderFn=runCoder, evalFn=runBatchEval)
                 asyncio.run(scheduler.run())
+                printProjectSummary(query, techStack, scheduler.taskOutputs, WORK_DIR)
                 gitHubAgent.publish(curQuery, targetBranch)

@@ -37,6 +37,29 @@ def runPreRepairTriage(feedback: str, techStack: str = "") -> str:
     except Exception:
         return ""
 
+def decideRepairAgent(feedback: str, consecutiveTesterCount: int = 0) -> str:
+    if consecutiveTesterCount >= 2:
+        return "coder"
+    lowerFb = feedback.lower()
+    if "tester execution failed" not in lowerFb and "exit code:" not in lowerFb:
+        return "coder"
+    prompt = (
+        f"Verification failed with output:\n{feedback[:2000]}\n\n"
+        "Decide which agent should handle this failure:\n"
+        "- TESTER: If this is an environmental issue, command timeout, transient execution error, port busy, or incomplete verification where the Tester should re-run verification commands.\n"
+        "- CODER: If this is a source code bug, compilation error, syntax error, missing dependency, or application logic defect requiring code changes.\n"
+        "Reply strictly with TESTER or CODER."
+    )
+    try:
+        response = get_llm().invoke([HumanMessage(content=prompt)])
+        content = response.content
+        text = "".join(p if isinstance(p, str) else p.get("text", "") for p in content) if isinstance(content, list) else str(content)
+        if "TESTER" in text.upper():
+            return "tester"
+        return "coder"
+    except Exception:
+        return "coder"
+
 class Scheduler:
 
     def __init__(self, dag: DAG, goal: str = "", techStack: str = "", fileStructure: Optional[list] = None, coderFn: Optional[Callable] = None, evalFn: Optional[Callable] = None):
@@ -246,8 +269,20 @@ class Scheduler:
                 if passed:
                     print("\n[Kaizen] All plan tasks executed and verified successfully.\n")
                 else:
+                    consecutiveTesterCount = 0
                     for repair in range(1, 11):
-                        print(f"\n[Verification Repair {repair}/10] Triggering Coder Agent to fix verification failure...")
+                        targetAgent = decideRepairAgent(fb, consecutiveTesterCount)
+                        if targetAgent == "tester":
+                            consecutiveTesterCount += 1
+                            print(f"\n[Verification Repair {repair}/10] LLM routed failure to Tester Agent to re-run verification...")
+                            passed, fb = await asyncio.to_thread(self.evalFn, completedTasks, allCoderResults, True)
+                            if passed:
+                                print(f"\n[Verification Repair] Repair {repair} succeeded.")
+                                break
+                            continue
+
+                        consecutiveTesterCount = 0
+                        print(f"\n[Verification Repair {repair}/10] LLM routed failure to Coder Agent to fix verification failure...")
                         triageDiagnosis = runPreRepairTriage(fb, self.techStack)
                         if triageDiagnosis:
                             print(f"\n[Pre-Repair Triage]:\n{triageDiagnosis}\n")
