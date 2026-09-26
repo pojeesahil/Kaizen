@@ -90,6 +90,7 @@ class GitHubAgent:
                 f.write(prefix + "\n".join(newLines) + "\n")
 
     def ensureRepo(self) -> bool:
+        self.workDir.mkdir(parents=True, exist_ok=True)
         gitDir = self.workDir / ".git"
         if not gitDir.exists():
             code, _, _ = self.runGitCommand(["init"])

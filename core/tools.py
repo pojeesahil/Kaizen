@@ -27,7 +27,10 @@ def resolvePath(path: str) -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     targetPath = Path(path)
     if targetPath.is_absolute():
-        return targetPath
+        if str(targetPath.resolve()).startswith(str(WORK_DIR.resolve())):
+            return targetPath.resolve()
+        parts = [p for p in targetPath.parts if p not in ("work", ".", targetPath.anchor)]
+        return (WORK_DIR / Path(*parts)).resolve() if parts else WORK_DIR
     parts = [p for p in targetPath.parts if p not in ("work", ".")]
     if parts:
         return (WORK_DIR / Path(*parts)).resolve()
@@ -777,3 +780,6 @@ tools = [
     executeCommand,
     executor
 ]
+
+from core.mcp import getMcpTools
+tools.extend(getMcpTools())

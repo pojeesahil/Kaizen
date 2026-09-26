@@ -2,22 +2,22 @@ import os
 import re
 from pathlib import Path
 
-INTENT_PROMPT = """You are a software project assistant. A developer typed an instruction into a coding tool.
-Your only job is to decide if the instruction is asking to:
-- "patch": fix, adjust, or improve something that already exists in the project
-- "build": create a new feature, file, or project from scratch
+INTENT_PROMPT = """You are an intelligent software development assistant. A developer gave an instruction in the workspace.
+Decide if this instruction should be handled by:
+- "direct": an operational task, tool action (git clone, pull, push, status, command, web search), inspection, query, bugfix, or modifying code in an existing project.
+- "build": architecting and generating a brand new multi-module software project from complete scratch (e.g. building an entire game or full-stack application from zero).
 
-Reply with a single lowercase word: patch or build
+Reply with a single lowercase word: direct or build
 
 Examples:
-- "fix the dialogue system" → patch
-- "the NPC movement is broken" → patch
-- "player health doesn't reset on death" → patch
-- "build a snake game in python" → build
-- "create a login page" → build
-- "implement a quest tracker" → build
-- "add dark mode to the existing UI" → patch
-- "start a new react app" → build
+- "pull data from my github from repo javatest" → direct
+- "clone the repo" → direct
+- "fix the dialogue system" → direct
+- "check git status" → direct
+- "add a helper function to utils.py" → direct
+- "build a complete 2d minecraft game in java from scratch" → build
+- "create a full-stack e-commerce web app in react and node from scratch" → build
+- "start a brand new chess game in python from zero" → build
 
 Instruction: {instruction}
 
@@ -32,9 +32,9 @@ def classifyIntent(instruction: str) -> str:
     tokens = rawText.strip().lower().split()
     for token in tokens:
         cleaned = re.sub(r"[^\w]", "", token)
-        if cleaned in ("patch", "build"):
-            return cleaned
-    return "build"
+        if cleaned in ("direct", "patch", "build"):
+            return "direct" if cleaned in ("direct", "patch") else "build"
+    return "direct"
 
 
 def readWorkspaceFiles(workDir: Path, maxBytes: int = 60000) -> str:
@@ -97,14 +97,20 @@ def readWorkspaceFiles(workDir: Path, maxBytes: int = 60000) -> str:
 
 def buildPatchInstruction(userInstruction: str, workDir: Path) -> str:
     workspaceSnapshot = readWorkspaceFiles(workDir)
+    from agents.github_mcp import getAuthenticatedUser
+    authUser = getAuthenticatedUser()
 
     parts = [
-        "PATCH MODE - Targeted updates and additions.",
-        "You can create new files with createFile or createFiles whenever new assets, files, or utilities are needed.",
-        "For existing files, inspect them with readFile and make targeted modifications.",
+        "DIRECT EXECUTION MODE - Execute the user instruction directly using your tools.",
+        f"Connected GitHub Account: {authUser}" if authUser else "",
+        "WORKSPACE BOUNDARY: All file creations, git clones, and modifications MUST strictly be located inside the 'work' directory.",
+        "When cloning an external repository, clone directly into the workspace root (e.g. 'git clone <url> .') or inside work/.",
+        "You have access to file tools, shell execution, and GitHub MCP tools (github_*).",
+        "For coding tasks, use readFile, createFile, editFile, and replaceBlock for targeted modifications.",
         "",
         f"User instruction: {userInstruction.strip()}",
     ]
+    parts = [p for p in parts if p]
 
     if workspaceSnapshot:
         parts.append("")

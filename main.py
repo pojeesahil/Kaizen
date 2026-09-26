@@ -268,6 +268,8 @@ coderTools = [
     finishTask,
     executor
 ]
+from core.mcp import getMcpTools
+coderTools.extend(getMcpTools())
 testerTools = [
     executeCommand
 ]
@@ -1295,8 +1297,8 @@ if __name__ == "__main__":
 
             mode = classifyIntent(query)
 
-            if mode == "patch":
-                print("\n[Kaizen] Patch mode detected, skipping full planning pipeline.\n")
+            if mode in ("direct", "patch"):
+                print("\n[Kaizen] Direct execution mode, running tool-enabled agent loop.\n")
                 loadCag(str(WORK_DIR))
                 patchInstruction = buildPatchInstruction(query, WORK_DIR)
                 if retrievedMemories:
@@ -1306,12 +1308,13 @@ if __name__ == "__main__":
                 patchSummary = patchResult.get("coderMessage", "").strip() if isinstance(patchResult, dict) else ""
                 if patchSummary:
                     print("\n" + "=" * 60)
-                    print("[Kaizen] Patch complete,here is what was changed:\n")
+                    print("[Kaizen] Execution complete:\n")
                     print(patchSummary)
                     print("=" * 60 + "\n")
                 else:
-                    print("\n[Kaizen] Patch complete.\n")
-                gitHubAgent.publish(query, targetBranch)
+                    print("\n[Kaizen] Execution complete.\n")
+                if targetBranch or any(w in query.lower() for w in ("publish", "push to github", "create pr")):
+                    gitHubAgent.publish(query, targetBranch)
             else:
                 promptAgent = PromptAgent()
                 curQuery = query

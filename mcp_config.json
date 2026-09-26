@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": ".venv/Scripts/python.exe",
+      "args": [
+        "agents/github_mcp.py"
+      ]
+    }
+  }
+}
