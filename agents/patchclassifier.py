@@ -4,13 +4,15 @@ from pathlib import Path
 
 INTENT_PROMPT = """You are an intelligent software development assistant. A developer gave an instruction in the workspace.
 Decide if this instruction should be handled by:
-- "direct": an operational task, tool action (git clone, pull, push, status, command, web search), inspection, query, bugfix, or modifying code in an existing project.
+- "direct": an operational task, tool action (git clone, pull, push, status, command, web search, database/supabase query or migration), inspection, query, bugfix, or modifying code in an existing project.
 - "build": architecting and generating a brand new multi-module software project from complete scratch (e.g. building an entire game or full-stack application from zero).
 
 Reply with a single lowercase word: direct or build
 
 Examples:
 - "pull data from my github from repo javatest" → direct
+- "list my supabase tables" → direct
+- "add a table to supabase" → direct
 - "clone the repo" → direct
 - "fix the dialogue system" → direct
 - "check git status" → direct
@@ -99,13 +101,16 @@ def buildPatchInstruction(userInstruction: str, workDir: Path) -> str:
     workspaceSnapshot = readWorkspaceFiles(workDir)
     from agents.github_mcp import getAuthenticatedUser
     authUser = getAuthenticatedUser()
+    supabaseProjectRef = os.getenv("SUPABASE_PROJECT_REF", "")
 
     parts = [
         "DIRECT EXECUTION MODE - Execute the user instruction directly using your tools.",
         f"Connected GitHub Account: {authUser}" if authUser else "",
+        f"Connected Supabase Project ID: {supabaseProjectRef}" if supabaseProjectRef else "",
         "WORKSPACE BOUNDARY: All file creations, git clones, and modifications MUST strictly be located inside the 'work' directory.",
         "When cloning an external repository, clone directly into the workspace root (e.g. 'git clone <url> .') or inside work/.",
-        "You have access to file tools, shell execution, and GitHub MCP tools (github_*).",
+        "You have access to file tools, shell execution, GitHub MCP tools (github_*), and Supabase MCP tools (supabase_*).",
+        f"For Supabase operations (creating tables, running SQL, migrations, querying), use the supabase_* tools directly with project_id='{supabaseProjectRef}'." if supabaseProjectRef else "For Supabase operations, use the supabase_* tools.",
         "For coding tasks, use readFile, createFile, editFile, and replaceBlock for targeted modifications.",
         "",
         f"User instruction: {userInstruction.strip()}",

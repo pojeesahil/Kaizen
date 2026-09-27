@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 import threading
@@ -97,6 +98,11 @@ def loadMcpTools() -> list[BaseTool]:
         return _cachedMcpTools
 
     baseDir = Path(__file__).resolve().parent.parent
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(baseDir / "secure.env")
+    except Exception:
+        pass
     configPath = baseDir / "mcp_config.json"
     if not configPath.exists():
         return []
@@ -124,10 +130,14 @@ def loadMcpTools() -> list[BaseTool]:
             else:
                 resolvedArgs.append(arg)
 
+        mergedEnv = dict(os.environ)
+        if serverConfig.get("env"):
+            mergedEnv.update(serverConfig.get("env"))
+
         params = StdioServerParameters(
             command=str(cmdPath),
             args=resolvedArgs,
-            env=serverConfig.get("env"),
+            env=mergedEnv,
             cwd=str((baseDir / "work").resolve())
         )
 
