@@ -112,6 +112,7 @@ def buildPatchInstruction(userInstruction: str, workDir: Path) -> str:
         "You have access to file tools, shell execution, GitHub MCP tools (github_*), and Supabase MCP tools (supabase_*).",
         f"For Supabase operations (creating tables, running SQL, migrations, querying), use the supabase_* tools directly with project_id='{supabaseProjectRef}'." if supabaseProjectRef else "For Supabase operations, use the supabase_* tools.",
         "For coding tasks, use readFile, createFile, editFile, and replaceBlock for targeted modifications.",
+        "For SVG assets or icons, you MUST craft complete, production-ready vector graphics directly using <svg viewBox='...'> with real paths, shapes, and colors. NEVER generate placeholder SVGs, empty boxes, or text stubs.",
         "",
         f"User instruction: {userInstruction.strip()}",
     ]

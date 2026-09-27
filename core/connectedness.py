@@ -535,5 +535,27 @@ def validateConnectedness(workDir: Path) -> Tuple[bool, List[str]]:
                             f"[{rel}] Broken Import: Module '{sym}' not found in package '{mod}'."
                         )
 
+    if workDir.exists():
+        placeholderMarkers = ("placeholder", "todo", "dummy", "stub", "replace me", "temp asset")
+        for root, dirs, files in os.walk(workDir):
+            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", "venv", ".venv", "dist", "build")]
+            for fname in files:
+                if fname.lower().endswith(".svg"):
+                    svgPath = Path(root) / fname
+                    relSvg = svgPath.relative_to(workDir).as_posix()
+                    try:
+                        with open(svgPath, "r", encoding="utf-8", errors="ignore") as f:
+                            svgTxt = f.read().strip()
+                        if len(svgTxt) < 80:
+                            errors.append(f"[{relSvg}] Placeholder SVG detected: file is empty or trivial ({len(svgTxt)} bytes).")
+                            continue
+                        lowerSvg = svgTxt.lower()
+                        for marker in placeholderMarkers:
+                            if marker in lowerSvg:
+                                errors.append(f"[{relSvg}] Placeholder SVG detected: contains placeholder keyword '{marker}'.")
+                                break
+                    except Exception:
+                        pass
+
     isValid = len(errors) == 0
     return isValid, errors

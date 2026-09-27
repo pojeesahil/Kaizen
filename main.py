@@ -10,7 +10,7 @@ from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from core.config import llm, get_llm
+from core.config import llm, get_llm, sanitize_messages
 from core.tools import (
     tools,
     createFile,
@@ -275,17 +275,22 @@ testerTools = [
 ]
 coderModel = llm.bind_tools(coderTools)
 testerModel = llm.bind_tools(testerTools)
+criticModel = llm
 agentModel = llm.bind_tools(tools)
 
 def streamInvoke(model, messages):
     fullResponse = None
-    for chunk in model.stream(messages):
+    cleanMsgs = sanitize_messages(messages)
+    for chunk in model.stream(cleanMsgs):
         if chunk.content:
             cleanChunk = extractText(chunk.content)
             if cleanChunk:
                 print(cleanChunk, end="", flush=True)
         fullResponse = chunk if fullResponse is None else fullResponse + chunk
     print("\n")
+    if fullResponse is not None:
+        if not getattr(fullResponse, "content", None) and not getattr(fullResponse, "tool_calls", None):
+            fullResponse.content = "[No text content]"
     return fullResponse
 
 class AgentState(TypedDict, total=False):
@@ -399,6 +404,7 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
    - Whenever you add, rename, or modify a function, class, method, route, or export in one file, you MUST immediately update all dependent files (caller functions, import/require statements, routes, and server entrypoints) in the same response so the entire project remains connected and working.
 7. Completeness & Quality:
    - Provide complete, working implementations (no stubs, placeholders, or TODO comments).
+   - ZERO PLACEHOLDER SVGs: When an SVG asset, icon, sprite, or graphic is required, you MUST craft a complete, production-ready vector graphic directly using valid SVG syntax (<svg viewBox="..." xmlns="..."> with real <path>, <circle>, <rect>, <polygon>, gradients, and styled fill/stroke). NEVER generate placeholder SVGs, dummy wireframe boxes, or SVGs containing text like 'Placeholder' or 'TODO'. Every SVG must be fully rendered art representing the actual asset.
    - Do NOT hardcode secrets or API keys; use environment variables with fallback defaults.
 8. SIGNATURE MATCHING:
    - Before calling ANY constructor or function, use 'readFile' to check the existing file and match the EXACT parameter names and order already defined.
@@ -652,6 +658,32 @@ def alignFrontendConventions(workDir: Path) -> None:
                 except Exception:
                     pass
 
+def validateSvgQuality(workDir: Path, files: list) -> tuple[bool, str]:
+    placeholderKeywords = ("placeholder", "todo", "dummy", "stub", "sample svg", "replace me", "temporary")
+    vectorTags = ("<path", "<circle", "<polygon", "<polyline", "<ellipse", "<line", "<rect", "<g")
+    for relPath in files:
+        if not str(relPath).lower().endswith(".svg"):
+            continue
+        fullPath = workDir / relPath
+        if not fullPath.exists():
+            continue
+        try:
+            with open(fullPath, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read().strip()
+        except Exception:
+            continue
+        if len(content) < 80:
+            return False, f"SVG asset '{relPath}' is empty or too trivial ({len(content)} bytes). Author complete vector graphics directly."
+        lowerContent = content.lower()
+        if "<svg" not in lowerContent or "</svg>" not in lowerContent:
+            return False, f"SVG asset '{relPath}' is malformed (missing <svg> root tag)."
+        for kw in placeholderKeywords:
+            if kw in lowerContent:
+                return False, f"SVG asset '{relPath}' contains placeholder marker '{kw}'. Author complete, real vector artwork directly."
+        if not any(tag in lowerContent for tag in vectorTags):
+            return False, f"SVG asset '{relPath}' lacks vector graphic elements. Author complete vector artwork directly."
+    return True, ""
+
 workspaceSnapshot = getWorkspaceSnapshot(WORK_DIR)
 
 def criticNode(state: AgentState) -> dict:
@@ -672,15 +704,67 @@ def criticNode(state: AgentState) -> dict:
     changedFiles = getChangedFiles(WORK_DIR, workspaceSnapshot)
     allSnapshot = getWorkspaceSnapshot(WORK_DIR)
     instLower = state["instruction"].lower()
+    fbLower = state.get("feedback", "").lower()
+
+    instClean = re.sub(r"[^a-z0-9]+", " ", instLower)
+    instTokens = set(instClean.split())
+
     for rel in allSnapshot:
-        if rel not in changedFiles:
-            if rel.lower() in instLower or Path(rel).name.lower() in instLower:
-                changedFiles.append(rel)
+        if rel in changedFiles:
+            continue
+        relLower = rel.lower()
+        stemLower = Path(rel).stem.lower()
+        stemWithSpaces = stemLower.replace("_", " ").replace("-", " ")
+
+        # 1. Exact path or filename in instruction or feedback
+        if relLower in instLower or Path(rel).name.lower() in instLower or relLower in fbLower or Path(rel).name.lower() in fbLower:
+            changedFiles.append(rel)
+            continue
+
+        # 2. Stem with spaces in instruction or feedback (e.g. 'wall segment' in instruction)
+        if stemWithSpaces in instLower or stemWithSpaces in fbLower:
+            changedFiles.append(rel)
+            continue
+
+        # 3. Stem tokens match instruction
+        stemWords = [w for w in re.split(r"[^a-z0-9]+", stemLower) if len(w) > 2]
+        if stemWords and all(w in instTokens or any(w in t for t in instTokens) for w in stemWords):
+            changedFiles.append(rel)
+            continue
+
+        # 4. If instruction or feedback mentions SVGs or assets, include all SVGs
+        if ("svg" in instLower or "asset" in instLower or "svg" in fbLower or "asset" in fbLower) and relLower.endswith(".svg"):
+            changedFiles.append(rel)
+            continue
+
+    # 5. Extract referenced files from code in changed files
+    for rel in list(changedFiles):
+        fpath = WORK_DIR / rel
+        if fpath.exists() and fpath.suffix in (".py", ".js", ".ts", ".html", ".json"):
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                    code = f.read(50000)
+                for cand in allSnapshot:
+                    if cand not in changedFiles and (f'"{cand}"' in code or f"'{cand}'" in code):
+                        changedFiles.append(cand)
+            except Exception:
+                pass
+
     changedFiles.sort()
     if not changedFiles:
         entryCandidates = ("main", "app", "index", "server")
         entryFiles = [f for f in allSnapshot if any(c in Path(f).stem.lower() for c in entryCandidates)]
         changedFiles = entryFiles if entryFiles else allSnapshot[:5]
+
+    isSvgValid, svgFeedback = validateSvgQuality(WORK_DIR, changedFiles)
+    if not isSvgValid:
+        print(f"\n[Critic Tier 1: Micro] Rejected placeholder SVG: {svgFeedback}")
+        return {
+            "messages": [AIMessage(content=f"FAIL: {svgFeedback}")],
+            "feedback": f"Critic Feedback:\nFAIL: {svgFeedback}",
+            "success": False,
+            "isAssetOnly": False
+        }
 
     if isAssetOnlyTask(state["instruction"], changedFiles):
         print("\n[Critic Tier 1: Micro] Asset/Documentation task verified via workspace file state.")
@@ -693,10 +777,12 @@ def criticNode(state: AgentState) -> dict:
 
     changedFilesContent = formatChangedFilesContent(WORK_DIR, changedFiles)
     manifestContext = formatManifestContext(WORK_DIR)
+    existingFilesList = ", ".join(sorted(allSnapshot.keys()))
 
     microPretext = (
         "You are an expert Micro Code Critic reviewing task-level code modifications.\n"
         "Review the modified files and task instructions strictly for correctness, missing method calls, and stub implementations.\n"
+        "Enforce zero placeholder SVGs: any SVG asset must be complete, visually detailed vector artwork with paths, shapes, and colors. Reject any placeholder SVGs or dummy boxes.\n"
         "Existing workspace files from prior completed milestones are established and do not need re-modification.\n"
         "If a task objective specifies a file or library that contradicts the primary Target Tech Stack or existing codebase, implementing the equivalent functionality using the project's designated language/stack is acceptable.\n"
         "If no files were modified because existing entrypoint files already fully satisfy the integration or wiring, respond strictly with PASS.\n"
@@ -705,14 +791,17 @@ def criticNode(state: AgentState) -> dict:
     microInstruction = (
         f"Task Instruction: {state['instruction']}\n"
         f"Coder Summary: {state.get('coderMessage', '')}\n\n"
+        f"Existing Workspace Files: {existingFilesList}\n\n"
         f"Modified Files & Content:\n{changedFilesContent if changedFilesContent else 'No changed files detected; inspect symbol registry.'}\n\n"
         f"Symbol Registry:\n{manifestContext}\n\n"
         "Evaluate the changes. Respond starting strictly with PASS or FAIL."
     )
 
     print("\n[Critic Tier 1: Micro] Evaluating modified files against task contract...")
-    microResponse = streamInvoke(agentModel, [SystemMessage(content=microPretext), HumanMessage(content=microInstruction)])
+    microResponse = streamInvoke(criticModel, [SystemMessage(content=microPretext), HumanMessage(content=microInstruction)])
     microMessage = extractText(microResponse.content)
+    if not microMessage.strip():
+        microMessage = "FAIL: Critic did not return an evaluation."
     microPass = microMessage.strip().upper().startswith("PASS")
 
     if not microPass:
@@ -773,6 +862,7 @@ def criticNode(state: AgentState) -> dict:
         "- Network: verify endpoints, ports, and CORS.\n"
         "- Persistence: verify DB schema, initialization, and seeding.\n"
         "- Mounting: verify routes and components connect to root.\n"
+        "- Assets: verify required SVG graphics and assets are complete, rendered vector graphics with zero placeholder stubs.\n"
         "Respond starting strictly with PASS if the system architecture is coherent, or FAIL followed by diagnostics."
     )
     systemInstruction = (
@@ -782,8 +872,10 @@ def criticNode(state: AgentState) -> dict:
         "Evaluate end-to-end architecture. Respond starting strictly with PASS or FAIL."
     )
 
-    systemResponse = streamInvoke(agentModel, [SystemMessage(content=systemPretext), HumanMessage(content=systemInstruction)])
+    systemResponse = streamInvoke(criticModel, [SystemMessage(content=systemPretext), HumanMessage(content=systemInstruction)])
     systemMessage = extractText(systemResponse.content)
+    if not systemMessage.strip():
+        systemMessage = "FAIL: System Critic did not return an evaluation."
     systemPass = systemMessage.strip().upper().startswith("PASS")
 
     return {
