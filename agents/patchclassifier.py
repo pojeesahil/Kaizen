@@ -39,7 +39,7 @@ def classifyIntent(instruction: str) -> str:
     return "direct"
 
 
-def readWorkspaceFiles(workDir: Path, maxBytes: int = 60000) -> str:
+def readWorkspaceFiles(workDir: Path, maxBytes: int = 2000000) -> str:
     if not workDir.exists():
         return ""
 
@@ -80,13 +80,13 @@ def readWorkspaceFiles(workDir: Path, maxBytes: int = 60000) -> str:
 
             fpath = os.path.join(root, fname)
             size = os.path.getsize(fpath)
-            if size > 80000:
+            if size > 10000000:
                 continue
 
             relpath = os.path.relpath(fpath, workDir)
             try:
                 with open(fpath, "r", encoding="utf-8", errors="ignore") as handle:
-                    content = handle.read(40000)
+                    content = handle.read(2000000)
                 if content.strip():
                     snippet = f"--- {relpath} ---\n{content}"
                     accumulated.append(snippet)
@@ -102,17 +102,20 @@ def buildPatchInstruction(userInstruction: str, workDir: Path) -> str:
     from agents.github_mcp import getAuthenticatedUser
     authUser = getAuthenticatedUser()
     supabaseProjectRef = os.getenv("SUPABASE_PROJECT_REF", "")
+    userLower = userInstruction.lower()
+    hasSupabase = any(k in userLower for k in ["supabase", "database", "postgres", "table", "sql", "migration"])
+    hasGithub = any(k in userLower for k in ["github", "pr", "pull request", "issue", "repo", "clone", "commit", "branch"])
 
     parts = [
         "DIRECT EXECUTION MODE - Execute the user instruction directly using your tools.",
-        f"Connected GitHub Account: {authUser}" if authUser else "",
-        f"Connected Supabase Project ID: {supabaseProjectRef}" if supabaseProjectRef else "",
+        f"Connected GitHub Account: {authUser}" if (authUser and hasGithub) else "",
+        f"Connected Supabase Project ID: {supabaseProjectRef}" if (supabaseProjectRef and hasSupabase) else "",
         "WORKSPACE BOUNDARY: All file creations, git clones, and modifications MUST strictly be located inside the 'work' directory.",
         "When cloning an external repository, clone directly into the workspace root (e.g. 'git clone <url> .') or inside work/.",
-        "You have access to file tools, shell execution, GitHub MCP tools (github_*), and Supabase MCP tools (supabase_*).",
-        f"For Supabase operations (creating tables, running SQL, migrations, querying), use the supabase_* tools directly with project_id='{supabaseProjectRef}'." if supabaseProjectRef else "For Supabase operations, use the supabase_* tools.",
+        f"For Supabase operations (creating tables, running SQL, migrations, querying), use the supabase_* tools directly with project_id='{supabaseProjectRef}'." if (supabaseProjectRef and hasSupabase) else "",
+        "For GitHub operations, use the github_* tools directly." if hasGithub else "",
         "For coding tasks, use readFile, createFile, editFile, and replaceBlock for targeted modifications.",
-        "For SVG assets or icons, you MUST craft complete, production-ready vector graphics directly using <svg viewBox='...'> with real paths, shapes, and colors. NEVER generate placeholder SVGs, empty boxes, or text stubs.",
+        "For SVG assets or icons, you MUST craft complete, production-ready vector graphics directly using <svg viewBox='...'> with real paths, shapes, and colors (either as standalone .svg files or concise procedural vector drawing). NEVER generate placeholder SVGs, empty boxes, or text stubs.",
         "",
         f"User instruction: {userInstruction.strip()}",
     ]

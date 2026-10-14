@@ -157,12 +157,12 @@ class Scheduler:
                 if ext not in supportedExts:
                     continue
                 fpath = os.path.join(root, fname)
-                if os.path.getsize(fpath) > 100000:
+                if os.path.getsize(fpath) > 10000000:
                     continue
                 relpath = os.path.relpath(fpath, self.workDir)
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read(50000)
+                        content = f.read(2000000)
                     if content.strip():
                         parts.append(f"[File: {relpath}]\n{content}")
                 except Exception:
@@ -244,7 +244,7 @@ class Scheduler:
                             f"Target Tech Stack: {self.techStack}\n\n"
                             f"The latest batch of tasks failed Critic review.\n"
                             f"Critic feedback:\n{fb}\n\n"
-                            "Inspect the current workspace files and use tool calls (createFile, createFiles, editFile, replaceBlock, upsertFunction, upsertClass, appendToFile, grepFiles, searchWeb) to fix all issues."
+                            "Fix all reported issues immediately. Do not waste turns inspecting or grepping files. Directly create or edit the missing or invalid files using createFile, createFiles, editFile, or replaceBlock in your first turn, then call finishTask."
                         )
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=fb)
                         coderResults.append(fixRes)
@@ -293,7 +293,7 @@ class Scheduler:
                             f"The project failed verification after all tasks completed.\n"
                             f"Critic/Tester feedback:\n{fb}\n\n"
                             f"{triageSection}"
-                            "Inspect the current workspace files and use tool calls (createFile, createFiles, editFile, replaceBlock, upsertFunction, upsertClass, appendToFile, grepFiles, searchWeb) to fix all issues so the application runs correctly."
+                            "Fix all reported verification issues immediately. Do not waste turns inspecting or grepping files. Directly modify or create the necessary files using createFile, createFiles, editFile, or replaceBlock in your first turn, then call finishTask."
                         )
                         enhancedFb = f"{fb}\n\n[Pre-Repair Triage Analysis]:\n{triageDiagnosis}" if triageDiagnosis else fb
                         fixRes = await asyncio.to_thread(self.coderFn, repairPrompt, taskContext=self.readWorkspaceFiles(), feedback=enhancedFb)

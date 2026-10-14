@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Iterator
 from agents.models import dagPlan, planningEvent
 from agents.deliverabledetector import deliverableDetector
@@ -29,10 +30,13 @@ class plannerAgent:
         techStack = promptAgentOutput.get("tech_stack") or promptAgentOutput.get("techStack") or ""
         fileStructure = promptAgentOutput.get("file_structure") or promptAgentOutput.get("fileStructure") or []
 
-        plansList = []
-        for targetDeliverable in resolvedDeliverables:
-            planItem = self.planner.plan(targetDeliverable, techStack=techStack, fileStructure=fileStructure)
-            plansList.append(planItem)
+        workerCount = min(len(resolvedDeliverables), 8) or 1
+        with ThreadPoolExecutor(max_workers=workerCount) as executor:
+            futures = [
+                executor.submit(self.planner.plan, targetDeliverable, techStack=techStack, fileStructure=fileStructure)
+                for targetDeliverable in resolvedDeliverables
+            ]
+            plansList = [targetFuture.result() for targetFuture in futures]
 
         combinedPlan = self.merger.merge(plansList, resolvedDeliverables)
         self.lastResult = combinedPlan

@@ -25,16 +25,17 @@ _syncCAG = syncCag
 
 def resolvePath(path: str) -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    targetPath = Path(path)
+    cleanPath = str(path).strip().strip("'\"`")
+    targetPath = Path(cleanPath)
     if targetPath.is_absolute():
         if str(targetPath.resolve()).startswith(str(WORK_DIR.resolve())):
             return targetPath.resolve()
-        parts = [p for p in targetPath.parts if p not in ("work", ".", targetPath.anchor)]
+        parts = [p.strip().strip("'\"`") for p in targetPath.parts if p not in ("work", ".", targetPath.anchor)]
         return (WORK_DIR / Path(*parts)).resolve() if parts else WORK_DIR
-    parts = [p for p in targetPath.parts if p not in ("work", ".")]
+    parts = [p.strip().strip("'\"`") for p in targetPath.parts if p not in ("work", ".")]
     if parts:
         return (WORK_DIR / Path(*parts)).resolve()
-    return (WORK_DIR / targetPath.name).resolve()
+    return (WORK_DIR / targetPath.name.strip().strip("'\"`")).resolve()
 
 @tool
 def createFile(path: str, content: str) -> str:
@@ -53,9 +54,18 @@ def createFiles(files: dict) -> str:
     """Create multiple files at once in the workspace using a dictionary mapping relative file paths to their content."""
     createdPaths = []
     failedPaths = []
-    for relPath, content in files.items():
+    if not isinstance(files, dict):
+        return "Error: createFiles expects a dictionary mapping file paths to their content."
+    actualFiles = files.get("files") if isinstance(files.get("files"), dict) else files
+    if "path" in actualFiles and "content" in actualFiles and len(actualFiles) == 2:
+        actualFiles = {actualFiles["path"]: actualFiles["content"]}
+    ignoredParamKeys = {"path", "content", "capsule", "summary", "reasoning", "thought", "files"}
+    for relPath, content in actualFiles.items():
+        cleanKey = str(relPath).strip().strip("'\"`")
+        if cleanKey.lower() in ignoredParamKeys and ("." not in cleanKey and "/" not in cleanKey and "\\" not in cleanKey):
+            continue
         try:
-            filePath = resolvePath(str(relPath))
+            filePath = resolvePath(cleanKey)
             if "node_modules" in filePath.parts:
                 failedPaths.append(f"{relPath}: modifying node_modules is not allowed")
                 continue

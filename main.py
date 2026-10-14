@@ -251,7 +251,7 @@ def executeToolCalls(response, toolsList):
 
     return executed
 
-coderTools = [
+baseCoderTools = [
     createFile,
     createFiles,
     editFile,
@@ -269,24 +269,34 @@ coderTools = [
     executor
 ]
 from core.mcp import getMcpTools
-coderTools.extend(getMcpTools())
+mcpToolsList = getMcpTools()
+allCoderTools = baseCoderTools + mcpToolsList
+coderTools = allCoderTools
+
+def selectCoderTools(state: dict) -> list:
+    query = f"{state.get('instruction', '')} {state.get('taskContext', '')} {state.get('context', '')} {state.get('feedback', '')}".lower()
+    mcpTriggers = {"supabase", "database", "postgres", "table", "sql", "migration", "github", "issue", "pull request", "pr", "commit", "branch", "repo", "repository", "remote"}
+    for tool in mcpToolsList:
+        prefix = tool.name.split("_")[0].lower() if "_" in tool.name else tool.name.lower()
+        mcpTriggers.add(prefix)
+    if any(trigger in query for trigger in mcpTriggers):
+        return allCoderTools
+    return baseCoderTools
+
 testerTools = [
     executeCommand
 ]
-coderModel = llm.bind_tools(coderTools)
 testerModel = llm.bind_tools(testerTools)
 criticModel = llm
 agentModel = llm.bind_tools(tools)
 
 def streamInvoke(model, messages):
-    fullResponse = None
     cleanMsgs = sanitize_messages(messages)
-    for chunk in model.stream(cleanMsgs):
-        if chunk.content:
-            cleanChunk = extractText(chunk.content)
-            if cleanChunk:
-                print(cleanChunk, end="", flush=True)
-        fullResponse = chunk if fullResponse is None else fullResponse + chunk
+    fullResponse = model.invoke(cleanMsgs)
+    if fullResponse and getattr(fullResponse, "content", None):
+        cleanChunk = extractText(fullResponse.content).strip()
+        if cleanChunk and cleanChunk != "[No text content]":
+            print(cleanChunk, flush=True)
     print("\n")
     if fullResponse is not None:
         if not getattr(fullResponse, "content", None) and not getattr(fullResponse, "tool_calls", None):
@@ -393,7 +403,8 @@ RULES:
 Reuse existing modules, avoid duplication/circular dependencies, and don't over-engineer with unnecessary abstractions.
 4. Call tools directly. Do not narrate or list planned edits in conversational text.
 5. File Operations:
-   - Use 'createFile' for a single new file, or 'createFiles' to write multiple files in one turn.
+   - Use 'createFile' for a single new file, or 'createFiles' to write multiple files in one turn. ALWAYS specify the exact target filename with extension directly (e.g. 'main.py', 'assets/player.svg'). NEVER use temporary extensions or underscores like 'assets_py' that necessitate extra 'moveFile' rename calls.
+   - Do NOT call 'readFile' on files you just created or modified yourself in the same turn; you already know their contents.
    - Use 'downloadAsset' to download assets or binary files from URLs.
    - Use 'moveFile' to move or rename files or directories from one path to another.
    - Use 'grepFiles' to find exact occurrences of functions, routes, and variables across the project.
@@ -404,7 +415,7 @@ Reuse existing modules, avoid duplication/circular dependencies, and don't over-
    - Whenever you add, rename, or modify a function, class, method, route, or export in one file, you MUST immediately update all dependent files (caller functions, import/require statements, routes, and server entrypoints) in the same response so the entire project remains connected and working.
 7. Completeness & Quality:
    - Provide complete, working implementations (no stubs, placeholders, or TODO comments).
-   - ZERO PLACEHOLDER SVGs: When an SVG asset, icon, sprite, or graphic is required, you MUST craft a complete, production-ready vector graphic directly using valid SVG syntax (<svg viewBox="..." xmlns="..."> with real <path>, <circle>, <rect>, <polygon>, gradients, and styled fill/stroke). NEVER generate placeholder SVGs, dummy wireframe boxes, or SVGs containing text like 'Placeholder' or 'TODO'. Every SVG must be fully rendered art representing the actual asset.
+   - ZERO PLACEHOLDER SVGs & MODULAR ASSETS: When an SVG asset, icon, sprite, or graphic is required, you MUST craft a complete, production-ready vector graphic directly using valid SVG syntax (<svg viewBox="..." xmlns="..."> with real <path>, <circle>, <rect>, <polygon>, gradients, and styled fill/stroke). Save SVGs as dedicated standalone files under assets/ or use concise procedural vector drawing. NEVER pack dozens of raw SVGs into a single giant code file to prevent token limit truncations. NEVER generate placeholder SVGs, dummy wireframe boxes, or SVGs containing text like 'Placeholder' or 'TODO'. Every SVG must be fully rendered art representing the actual asset.
    - Do NOT hardcode secrets or API keys; use environment variables with fallback defaults.
 8. SIGNATURE MATCHING:
    - Before calling ANY constructor or function, use 'readFile' to check the existing file and match the EXACT parameter names and order already defined.
@@ -439,24 +450,29 @@ QA Feedback to Address:
     if state.get("feedback") and state["feedback"] != "No feedback yet. This is your first attempt.":
         coderMessages.append(HumanMessage(content=f"Please fix the following issues reported by QA:\n{state['feedback']}"))
 
-    threadModel = get_llm().bind_tools(coderTools)
+    activeCoderTools = selectCoderTools(state)
+    threadModel = get_llm().bind_tools(activeCoderTools)
     allToolResults = []
     lastResponse = None
     lastMessage = ""
+    liveAst = initialAst
+    consecutiveTextTurns = 0
 
     for turn in range(50):
         coderResponse = streamInvoke(threadModel, coderMessages)
         lastResponse = coderResponse
         lastMessage = extractText(coderResponse.content)
-        toolResults = executeToolCalls(coderResponse, coderTools)
+        toolResults = executeToolCalls(coderResponse, allCoderTools)
 
         if not toolResults:
-            if turn < 2 and not allToolResults:
-                nudge = "You have not executed any tools yet. You must use tool calls (createFile, createFiles, editFile, replaceBlock, readFile) to inspect or modify code. Call the appropriate tool now."
+            consecutiveTextTurns += 1
+            if consecutiveTextTurns <= 2:
+                nudge = "You did not invoke any tools. Do not narrate in conversational text. If files still need to be created or modified, you MUST invoke tools (createFile, createFiles, editFile, replaceBlock) now. If all requirements for this task are completely satisfied, call 'finishTask(summary=...)' immediately."
                 coderMessages.extend([coderResponse, HumanMessage(content=nudge)])
                 continue
             break
 
+        consecutiveTextTurns = 0
         allToolResults.extend(toolResults)
         for tr in toolResults:
             print(f"{tr}\n")
@@ -470,9 +486,15 @@ QA Feedback to Address:
             allToolResults.append("Tool finishTask executed: Task auto-completed after reaching maximum tool call limit (50).")
             break
 
-        autoFixImports(WORK_DIR)
-        loadCag(str(WORK_DIR))
-        liveAst = formatManifestContext(WORK_DIR)
+        hasDiskChanges = any(
+            any(toolName in tr for toolName in ["Tool createFile executed:", "Tool createFiles executed:", "Tool editFile executed:", "Tool replaceBlock executed:", "Tool appendToFile executed:", "Tool upsertFunction executed:", "Tool upsertClass executed:", "Tool deleteResource executed:", "Tool moveFile executed:", "Tool executor executed:"])
+            for tr in toolResults
+        )
+        if hasDiskChanges:
+            autoFixImports(WORK_DIR)
+            loadCag(str(WORK_DIR))
+            liveAst = formatManifestContext(WORK_DIR)
+
         obsText = "\n".join(toolResults)
 
         finalNudge = (
@@ -484,6 +506,11 @@ QA Feedback to Address:
             f"Observation:\n{obsText}\n\nLive Workspace AST Context:\n{liveAst}\n\n"
             "Reflect on the updated AST and tool output. If further files, imports, or connections are needed to finish the task, take your next Action (tool call). If complete, call 'finishTask(summary=...)'."
         )
+
+        for msgIdx in range(len(coderMessages)):
+            if isinstance(coderMessages[msgIdx], HumanMessage) and "Live Workspace AST Context:" in getattr(coderMessages[msgIdx], "content", ""):
+                obsChunk = coderMessages[msgIdx].content.split("Live Workspace AST Context:")[0].strip()
+                coderMessages[msgIdx] = HumanMessage(content=f"{obsChunk}\n[Workspace AST updated in latest turn]")
 
         coderMessages.extend([
             coderResponse,
@@ -843,12 +870,12 @@ def criticNode(state: AgentState) -> dict:
                 if ext not in supportedExts:
                     continue
                 fpath = Path(root) / fname
-                if fpath.stat().st_size > 100000:
+                if fpath.stat().st_size > 10000000:
                     continue
                 rel = fpath.relative_to(WORK_DIR).as_posix()
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read(50000)
+                        content = f.read(2000000)
                     if content.strip():
                         workFileParts.append(f"[File: {rel}]\n{content}")
                 except Exception:

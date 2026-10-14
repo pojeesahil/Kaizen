@@ -26,6 +26,8 @@ SKIP_FILES = skipFiles
 SUPPORTED_EXTS = supportedExts
 
 _currentWorkDir: str = "work"
+maxFileSize: int = int(os.getenv("CAG_MAX_FILE_SIZE", 10000000))
+maxReadChars: int = int(os.getenv("CAG_MAX_READ_CHARS", 10000000))
 
 def loadCag(path: Optional[str] = None) -> int:
     global _currentWorkDir
@@ -47,11 +49,11 @@ def loadCag(path: Optional[str] = None) -> int:
 
             filePath = Path(root) / fname
             try:
-                if filePath.stat().st_size > 100000:
+                if filePath.stat().st_size > maxFileSize:
                     continue
                 relPath = filePath.relative_to(targetPath).as_posix()
                 with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(50000)
+                    content = f.read(maxReadChars)
                 _cache[relPath] = content
             except Exception:
                 continue
@@ -73,9 +75,9 @@ def updateCagFile(filePath: str, baseDir: Optional[str] = None) -> None:
         ext = fpath.suffix.lower()
         if ext in supportedExts or not ext:
             try:
-                if fpath.stat().st_size <= 100000:
+                if fpath.stat().st_size <= maxFileSize:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        _cache[relPath] = f.read(50000)
+                        _cache[relPath] = f.read(maxReadChars)
             except Exception:
                 pass
     else:
