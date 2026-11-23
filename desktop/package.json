@@ -1,0 +1,15 @@
+{
+  "name": "kaizen-desktop",
+  "version": "1.0.0",
+  "description": "Desktop UI for Kaizen Autonomous Multi-Agent Software Engine",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "author": "Kaizen Team",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
